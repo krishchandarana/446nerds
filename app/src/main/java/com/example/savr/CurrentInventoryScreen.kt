@@ -23,14 +23,17 @@ import com.savr.app.ui.theme.SavrColors
 @Composable
 fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
     var selectedCategory by remember { mutableStateOf(CurrentInventoryCategory.ALL) }
+    var showAddSheet by remember { mutableStateOf(false) }
+    val items = remember { mutableStateListOf(*CurrentInventoryItems.toTypedArray()) }
 
-    val displayedItems = remember(selectedCategory) {
-        if (selectedCategory == CurrentInventoryCategory.ALL) CurrentInventoryItems
-        else CurrentInventoryItems.filter { it.category == selectedCategory }
-    }
-
-    val grouped = remember(displayedItems) {
-        displayedItems.groupBy { it.category }
+    if (showAddSheet) {
+        AddCurrentInventoryItemSheet(
+            onSave = { newItem ->
+                items.add(newItem)
+                showAddSheet = false
+            },
+            onDismiss = { showAddSheet = false }
+        )
     }
 
     Box(modifier = Modifier.fillMaxSize().background(SavrColors.Cream)) {
@@ -97,20 +100,21 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
             }
 
             if (selectedCategory == CurrentInventoryCategory.ALL) {
-                CurrentInventoryCategory.values().filter { it != CurrentInventoryCategory.ALL }.forEach { cat ->
-                    val items = CurrentInventoryItems.filter { it.category == cat }
-                    if (items.isNotEmpty()) {
-                        SectionHeader("${cat.emoji} ${cat.label.uppercase()}")
-                        items.forEach { item -> CurrentInventoryItemRow(item) }
-                        Spacer(Modifier.height(4.dp))
+                CurrentInventoryCategory.values()
+                    .filter { it != CurrentInventoryCategory.ALL }
+                    .forEach { cat ->
+                        val catItems = items.filter { it.category == cat }
+                        if (catItems.isNotEmpty()) {
+                            SectionHeader("${cat.emoji} ${cat.label.uppercase()}")
+                            catItems.forEach { item -> CurrentInventoryItemRow(item) }
+                            Spacer(Modifier.height(4.dp))
+                        }
                     }
-                }
             } else {
-                grouped[selectedCategory]?.forEach { item -> CurrentInventoryItemRow(item) }
+                val filteredItems = items.filter { it.category == selectedCategory }
+                filteredItems.forEach { item -> CurrentInventoryItemRow(item) }
             }
         }
-
-        //TODO : ADD ITEM FUNCTIONALITY
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -118,7 +122,7 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                 .size(50.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(SavrColors.Dark)
-                .clickable { /* add item */ },   //TODO
+                .clickable { showAddSheet = true },
             contentAlignment = Alignment.Center
         ) {
             Text("+", color = SavrColors.White, fontSize = 22.sp)
