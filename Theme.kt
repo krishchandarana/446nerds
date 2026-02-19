@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+// ── Colours ───────────────────────────────────────────────────────────────────
 object SavrColors {
     val Cream      = Color(0xFFF5F0E8)
     val CreamMid   = Color(0xFFEDE8DF)
@@ -16,7 +17,7 @@ object SavrColors {
     val DarkMid    = Color(0xFF242424)
     val Dark2      = Color(0xFF1E1E1E)
     val Dark3      = Color(0xFF2C2C2C)
-    val DividerColour    = Color(0x12000000)
+    val Divider    = Color(0x12000000)
     val Sage       = Color(0xFF7A9E7E)
     val SageLight  = Color(0xFFA8C5AC)
     val SagePale   = Color(0xFFC8DECA)
@@ -28,12 +29,12 @@ object SavrColors {
     val White      = Color(0xFFFFFFFF)
     val TextMid    = Color(0xFF6B6B6B)
     val TextMuted  = Color(0xFF9B9B9B)
-//    val DividerColour = Color(0x12000000)
     val CardShadow = Color(0x0D000000)
 }
 
+// ── Typography ────────────────────────────────────────────────────────────────
 val SavrTypography = Typography(
-
+    // Page titles (Fraunces-style — use FontFamily.Serif as placeholder)
     displayMedium = TextStyle(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.Normal,
@@ -93,6 +94,7 @@ val SavrTypography = Typography(
     )
 )
 
+// ── Shapes ────────────────────────────────────────────────────────────────────
 val SavrShapes = Shapes(
     extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
     small      = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
@@ -101,6 +103,7 @@ val SavrShapes = Shapes(
     extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
 )
 
+// ── Material theme ────────────────────────────────────────────────────────────
 private val ColorScheme = lightColorScheme(
     primary            = SavrColors.Sage,
     onPrimary          = SavrColors.White,
