@@ -10,7 +10,9 @@ enum class CurrentInventoryCategory(val label: String, val emoji: String) {
     DAIRY("Dairy", "🥛"),
     PROTEIN("Protein", "🥩"),
     FRUIT("Fruit", "🍎"),
-    GRAIN("Grains", "🌾")
+    GRAIN("Grains", "🌾"),
+
+    OTHER("Other", "🥄")
 }
 enum class MealFilter { ALL, BREAKFAST, LUNCH, DINNER, QUICK }
 enum class NavTab(val label: String, val emoji: String) {
@@ -92,7 +94,6 @@ val CurrentInventoryItems = listOf(
     CurrentInventoryItem(12, "🍚", "Basmati Rice",     "500g",     "90 days",ExpiryStatus.FRESH,   CurrentInventoryCategory.GRAIN)
 )
 
-
 val allRecipes = listOf(
     Recipe(
         id = 1, emoji = "🥗", name = "Spinach & Feta Frittata",
@@ -158,24 +159,22 @@ val tuesdayMeals = listOf(
 
 
 val groceryCategories = listOf(
-    GroceryCategory("Produce", "🥬", listOf(
+    GroceryCategory("Vegetables", "🥬", listOf(
         GroceryItem(1,  "🧅", "Onion",           "2 large",  isChecked = true),
         GroceryItem(2,  "🫑", "Red Pepper",       "2 medium", isChecked = true),
         GroceryItem(3,  "🌿", "Fresh Basil",      "1 bunch"),
         GroceryItem(4,  "🥦", "Broccoli",         "1 head")
     )),
-    GroceryCategory("Dairy & Eggs", "🧀", listOf(
+    GroceryCategory("Dairy", "🧀", listOf(
         GroceryItem(5,  "🧀", "Parmesan",         "100g"),
         GroceryItem(6,  "🫙", "Double Cream",     "250ml",    isChecked = true)
     )),
-    GroceryCategory("Pantry", "🫙", listOf(
-        GroceryItem(7,  "🍝", "Spaghetti",        "500g"),
-        GroceryItem(8,  "🫒", "Olive Oil",        "1 bottle", isChecked = true),
-        GroceryItem(9,  "🧂", "Sea Salt",         "1 pack"),
-        GroceryItem(10, "🫙", "Tinned Tomatoes",  "2 cans")
-    )),
-    GroceryCategory("Meat & Fish", "🍗", listOf(
+    GroceryCategory("Protein", "🍗", listOf(
         GroceryItem(11, "🍗", "Chicken Thighs",   "600g"),
         GroceryItem(12, "🥓", "Pancetta",         "150g")
+    )),
+    GroceryCategory("Other", "🥄", listOf(
+        GroceryItem(8,  "🫒", "Olive Oil",        "1 bottle", isChecked = true),
+        GroceryItem(9,  "🧂", "Sea Salt",         "1 pack"),
     ))
 )

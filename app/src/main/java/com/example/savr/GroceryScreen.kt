@@ -20,24 +20,9 @@ import com.savr.app.ui.GroceryItem
 import com.savr.app.ui.groceryCategories
 import com.savr.app.ui.components.PageHeader
 import com.savr.app.ui.theme.SavrColors
-
-
-
-// TODO: IMPLEMENT THE ADD BUTTON
-//Box(
-//modifier = Modifier
-//.align(Alignment.BottomEnd)
-//.padding(end = 20.dp, bottom = 88.dp)
-//.size(50.dp)
-//.clip(RoundedCornerShape(16.dp))
-//.background(SavrColors.Dark)
-//.clickable { /* add item */ },   //TODO
-//contentAlignment = Alignment.Center
-//) {
-//    Text("+", color = SavrColors.White, fontSize = 22.sp)
-//}
 @Composable
 fun GroceryScreen() {
+    var showAddSheet by remember { mutableStateOf(false) }
     var checkedIds by remember {
         mutableStateOf(
             groceryCategories.flatMap { it.items }
@@ -46,50 +31,71 @@ fun GroceryScreen() {
                 .toSet()
         )
     }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SavrColors.Cream)
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = 90.dp)
-    ) {
-        PageHeader("Grocery List", subtitle = "")
+    if (showAddSheet) {
+        AddGroceryItemSheet(
+            onSave    = { newItem, categoryLabel -> showAddSheet = false },
+            onDismiss = { showAddSheet = false }
+        )
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(SavrColors.Cream)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 90.dp)
+        ) {
+            PageHeader("Grocery List", subtitle = "")
 
-        groceryCategories.forEach { category ->
-            Row(
-                modifier = Modifier
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 8.dp, bottom = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(category.emoji, fontSize = 14.sp)
-                Text(
-                    text       = category.title.uppercase(),
-                    color      = SavrColors.TextMid,
-                    fontSize   = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp
-                )
-            }
+            groceryCategories.forEach { category ->
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 8.dp, bottom = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(category.emoji, fontSize = 14.sp)
+                    Text(
+                        text = category.title.uppercase(),
+                        color = SavrColors.TextMid,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp
+                    )
+                }
 
-            category.items.forEach { item ->
-                val isChecked = item.id in checkedIds
-                GroceryItemRow(
-                    item      = item,
-                    isChecked = isChecked,
-                    onToggle  = {
-                        checkedIds = if (isChecked) {
-                            checkedIds - item.id
-                        } else {
-                            checkedIds + item.id
+                category.items.forEach { item ->
+                    val isChecked = item.id in checkedIds
+                    GroceryItemRow(
+                        item = item,
+                        isChecked = isChecked,
+                        onToggle = {
+                            checkedIds = if (isChecked) {
+                                checkedIds - item.id
+                            } else {
+                                checkedIds + item.id
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 88.dp)
+                .size(50.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(SavrColors.Dark)
+                .clickable {showAddSheet = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("+", color = SavrColors.White, fontSize = 22.sp)
         }
     }
 }
+
 
 @Composable
 private fun GroceryItemRow(item: GroceryItem, isChecked: Boolean, onToggle: () -> Unit) {
