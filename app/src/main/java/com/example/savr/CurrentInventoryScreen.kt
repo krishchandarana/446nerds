@@ -23,16 +23,16 @@ import com.savr.app.ui.theme.SavrColors
 @Composable
 fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
     var selectedCategory by remember { mutableStateOf(CurrentInventoryCategory.ALL) }
-    var showAddSheet by remember { mutableStateOf(false) }
+    val showAddSheet = remember { mutableStateOf(false) }
     val items = remember { mutableStateListOf(*CurrentInventoryItems.toTypedArray()) }
 
-    if (showAddSheet) {
+    if (showAddSheet.value) {
         AddCurrentInventoryItemSheet(
             onSave = { newItem ->
                 items.add(newItem)
-                showAddSheet = false
+                showAddSheet.value = false
             },
-            onDismiss = { showAddSheet = false }
+            onDismiss = { showAddSheet.value = false }
         )
     }
 
@@ -58,17 +58,15 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Generate Meal Plan",
-                            color = SavrColors.Dark2,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            lineHeight = 22.sp,
-                            letterSpacing = 1.5.sp,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
+                    Text(
+                        text = "Generate Meal Plan",
+                        color = SavrColors.Dark2,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 22.sp,
+                        letterSpacing = 1.2.sp,
+                        modifier = Modifier.weight(1f)
+                    )
                     Box(
                         modifier = Modifier
                             .size(30.dp)
@@ -76,7 +74,12 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                             .background(SavrColors.Sage),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("→", color = SavrColors.White, fontSize = 20.sp)
+                        Text(
+                            text = "→",
+                            color = SavrColors.White,
+                            fontSize = 16.sp,
+                            modifier = Modifier.offset(y = (-1).dp)
+                        )
                     }
                 }
             }
@@ -88,7 +91,7 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                     .padding(bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                CurrentInventoryCategory.values().forEach { cat ->
+                CurrentInventoryCategory.entries.forEach { cat ->
                     val label = if (cat == CurrentInventoryCategory.ALL) "All"
                                 else "${cat.emoji} ${cat.label}"
                     FilterPill(
@@ -100,7 +103,7 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
             }
 
             if (selectedCategory == CurrentInventoryCategory.ALL) {
-                CurrentInventoryCategory.values()
+                CurrentInventoryCategory.entries
                     .filter { it != CurrentInventoryCategory.ALL }
                     .forEach { cat ->
                         val catItems = items.filter { it.category == cat }
@@ -122,7 +125,7 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                 .size(50.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(SavrColors.Dark)
-                .clickable { showAddSheet = true },
+                .clickable { showAddSheet.value = true },
             contentAlignment = Alignment.Center
         ) {
             Text("+", color = SavrColors.White, fontSize = 22.sp)
