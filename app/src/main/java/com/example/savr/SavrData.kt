@@ -11,10 +11,9 @@ enum class CurrentInventoryCategory(val label: String, val emoji: String) {
     PROTEIN("Protein", "🥩"),
     FRUIT("Fruit", "🍎"),
     GRAIN("Grains", "🌾"),
-
     OTHER("Other", "🥄")
 }
-enum class MealFilter { ALL, BREAKFAST, LUNCH, DINNER, QUICK }
+
 enum class NavTab(val label: String, val emoji: String) {
     CURRENTINVENTORY("Inventory", "🧺"),
     MEALS("Meals", "🍽"),
@@ -22,7 +21,6 @@ enum class NavTab(val label: String, val emoji: String) {
     GROCERY("Grocery", "🛒"),
     PROFILE("Profile", "👤")
 }
-
 
 data class CurrentInventoryItem(
     val id: Int,
@@ -49,19 +47,7 @@ data class Recipe(
 
 data class DayChip(
     val dayName: String,
-    val dayNum: Int,
-    val hasMeal: Boolean,
-    val isActive: Boolean = false
-)
-
-data class MealSlot(
-    val slotLabel: String,
-    val emoji: String,
-    val mealName: String,
-    val calories: Int,
-    val minutes: Int,
-    val itemsUsedUp: Int = 0,
-    val isEmpty: Boolean = false
+    val dayNum: Int
 )
 
 data class GroceryItem(
@@ -77,7 +63,6 @@ data class GroceryCategory(
     val emoji: String,
     val items: List<GroceryItem>
 )
-
 
 val CurrentInventoryItems = listOf(
     CurrentInventoryItem(1,  "🥬", "Spinach",         "1 bag",    "1 day",  ExpiryStatus.URGENT,  CurrentInventoryCategory.VEG),
@@ -141,22 +126,15 @@ val allRecipes = listOf(
     )
 )
 
-
 val weekDays = listOf(
-    DayChip("Mon", 17, hasMeal = true),
-    DayChip("Tue", 18, hasMeal = true, isActive = true),
-    DayChip("Wed", 19, hasMeal = false),
-    DayChip("Thu", 20, hasMeal = true),
-    DayChip("Fri", 21, hasMeal = false),
-    DayChip("Sat", 22, hasMeal = false),
-    DayChip("Sun", 23, hasMeal = false)
+    DayChip("Mon", 17),
+    DayChip("Tue", 18),
+    DayChip("Wed", 19),
+    DayChip("Thu", 20),
+    DayChip("Fri", 21),
+    DayChip("Sat", 22),
+    DayChip("Sun", 23)
 )
-
-val tuesdayMeals = listOf(
-    MealSlot("☀️ Breakfast", "🥗", "Spinach & Feta Frittata", 320, 25, itemsUsedUp = 3),
-    MealSlot("🌤 Lunch",     "🍝", "Creamed Spinach Pasta",   480, 30)
-)
-
 
 val groceryCategories = listOf(
     GroceryCategory("Vegetables", "🥬", listOf(

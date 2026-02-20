@@ -3,7 +3,6 @@ package com.savr.app.ui.screens.meals
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -14,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,18 +20,18 @@ import com.savr.app.ui.*
 import com.savr.app.ui.components.*
 import com.savr.app.ui.theme.SavrColors
 
-//TODO: make add to plan work for meal plan page
 @Composable
-fun MealsScreen(onNavigateToPlan: () -> Unit) {
-    var selectedIds    by remember { mutableStateOf(setOf(1, 2)) }
-
+fun MealsScreen(
+    selectedIds: Set<Int>,
+    onToggleRecipe: (Int) -> Unit,
+    onNavigateToPlan: () -> Unit
+) {
     val selectedCount = selectedIds.size
     val countText = when (selectedCount) {
         0    -> "No meals selected"
         1    -> "1 meal selected"
         else -> "$selectedCount meals selected"
     }
-
 
     Box(modifier = Modifier.fillMaxSize().background(SavrColors.Cream)) {
 
@@ -53,13 +51,7 @@ fun MealsScreen(onNavigateToPlan: () -> Unit) {
                 RecipeCard(
                     recipe     = recipe,
                     isSelected = isSelected,
-                    onToggle   = {
-                        selectedIds = if (isSelected) {
-                            selectedIds - recipe.id
-                        } else {
-                            selectedIds + recipe.id
-                        }
-                    }
+                    onToggle   = { onToggleRecipe(recipe.id) }
                 )
             }
         }
