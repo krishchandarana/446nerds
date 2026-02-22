@@ -7,6 +7,7 @@ plugins {
     kotlin("plugin.serialization") version "2.0.21"
     alias(libs.plugins.ksp)
     id("dagger.hilt.android.plugin")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -68,6 +69,10 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
+    implementation("com.google.firebase:firebase-auth")
 
     debugImplementation(libs.androidx.ui.tooling)
 }

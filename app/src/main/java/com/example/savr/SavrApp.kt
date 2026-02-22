@@ -5,15 +5,55 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.awaitCancellation
 import com.savr.app.ui.components.SavrBottomNav
 import com.savr.app.ui.screens.CurrentInventory.CurrentInventoryScreen
 import com.savr.app.ui.screens.grocery.GroceryScreen
+import com.savr.app.ui.screens.login.CreateAccountScreen
+import com.savr.app.ui.screens.login.LoginScreen
 import com.savr.app.ui.screens.meals.MealsScreen
 import com.savr.app.ui.screens.plan.PlanScreen
 import com.savr.app.ui.screens.profile.ProfileScreen
 
 @Composable
 fun SavrApp(modifier: Modifier = Modifier) {
+    val isLoggedInState = remember { mutableStateOf(FirebaseAuth.getInstance().currentUser != null) }
+    var isLoggedIn by isLoggedInState
+
+    LaunchedEffect(Unit) {
+        val auth = FirebaseAuth.getInstance()
+        isLoggedInState.value = auth.currentUser != null
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            isLoggedInState.value = firebaseAuth.currentUser != null
+        }
+        auth.addAuthStateListener(listener)
+        try {
+            awaitCancellation()
+        } finally {
+            auth.removeAuthStateListener(listener)
+        }
+    }
+
+    if (!isLoggedIn) {
+        var showCreateAccount by remember { mutableStateOf(false) }
+        if (showCreateAccount) {
+            CreateAccountScreen(
+                onSuccess = {
+                    isLoggedIn = true
+                    showCreateAccount = false
+                },
+                onBack = { showCreateAccount = false }
+            )
+        } else {
+            LoginScreen(
+                onLoginSuccess = { isLoggedIn = true },
+                onNavigateToCreateAccount = { showCreateAccount = true }
+            )
+        }
+        return
+    }
+
     var currentTab by remember { mutableStateOf(NavTab.PLAN) }
     var plannedMealsByDay by remember {
         mutableStateOf(mapOf(1 to setOf(1, 2))) 
