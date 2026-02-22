@@ -4,24 +4,44 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.savr.data.UserProfile
+import com.example.savr.data.userProfileFlow
+import com.google.firebase.auth.FirebaseAuth
 import com.savr.app.ui.components.TagChip
 import com.savr.app.ui.components.TagStyle
 import com.savr.app.ui.theme.SavrColors
+import kotlinx.coroutines.flow.collectLatest
 
 @Composable
 fun ProfileScreen() {
+    var profile by remember { mutableStateOf<UserProfile?>(null) }
+
+    LaunchedEffect(Unit) {
+        userProfileFlow().collectLatest { profile = it }
+    }
+
+    val authUser = FirebaseAuth.getInstance().currentUser
+    val displayName = profile?.displayName?.takeIf { it.isNotBlank() }
+        ?: authUser?.displayName?.takeIf { it.isNotBlank() }
+        ?: "Savr User"
+    val username = profile?.username?.let { raw ->
+        when {
+            raw.contains("@") -> raw  // email stored as username: show as-is
+            raw.startsWith("@") -> raw
+            else -> "@$raw"
+        }
+    } ?: authUser?.email?.let { "@${it.substringBefore('@')}" }
+        ?: ""
+    val dietaryPreferences = profile?.dietaryPreferences ?: emptyList()
 
     Column(
         modifier = Modifier
@@ -33,9 +53,7 @@ fun ProfileScreen() {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    color = SavrColors.Dark2
-                )
+                .background(color = SavrColors.Dark2)
                 .padding(horizontal = 20.dp, vertical = 24.dp)
         ) {
             Column {
@@ -43,21 +61,21 @@ fun ProfileScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-
                     Column {
                         Text(
-                            text       = "Aisha",
-                            color      = SavrColors.White,
-                            fontSize   = 20.sp,
+                            text = displayName,
+                            color = SavrColors.White,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text     = "@aisha_cooks",
-                            color    = SavrColors.SageLight,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-
+                        if (username.isNotBlank()) {
+                            Text(
+                                text = username,
+                                color = SavrColors.SageLight,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -66,16 +84,27 @@ fun ProfileScreen() {
         SectionCard(title = "DIETARY PREFERENCES") {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(horizontal = 26.dp, vertical = 16.dp)
+                modifier = Modifier.padding(horizontal = 26.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                TagChip(" Vegetarian-Friendly", TagStyle.SAGE)
-                TagChip(" No Shellfish",         TagStyle.GRAY)
+                if (dietaryPreferences.isEmpty()) {
+                    Text(
+                        text = "None set",
+                        color = SavrColors.TextMuted,
+                        fontSize = 14.sp
+                    )
+                } else {
+                    dietaryPreferences.forEach { pref ->
+                        TagChip(" $pref", TagStyle.SAGE)
+                    }
+                }
             }
         }
 
-
         SectionCard(title = "ACCOUNT") {
-            SettingsLinkRow("🚪", "Sign Out")
+            SettingsLinkRow("🚪", "Sign Out", onClick = {
+                FirebaseAuth.getInstance().signOut()
+            })
             HorizontalDivider(color = SavrColors.DividerColour, modifier = Modifier.padding(horizontal = 16.dp))
             SettingsLinkRow("🗑️", "Delete Account", textColor = SavrColors.Terra)
         }
@@ -110,12 +139,13 @@ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Un
 private fun SettingsLinkRow(
     emoji: String,
     label: String,
-    textColor: androidx.compose.ui.graphics.Color = SavrColors.Dark
+    textColor: androidx.compose.ui.graphics.Color = SavrColors.Dark,
+    onClick: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { }
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween

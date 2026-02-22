@@ -23,10 +23,23 @@ fun SavrApp(modifier: Modifier = Modifier) {
 
     LaunchedEffect(Unit) {
         val auth = FirebaseAuth.getInstance()
-        isLoggedInState.value = auth.currentUser != null
-        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            isLoggedInState.value = firebaseAuth.currentUser != null
+        fun verifyAndSetLoggedIn() {
+            val user = auth.currentUser
+            if (user == null) {
+                isLoggedInState.value = false
+                return
+            }
+            // Force token refresh: if user was deleted (or revoked) on server, this fails and we sign out
+            user.getIdToken(true).addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    isLoggedInState.value = true
+                } else {
+                    auth.signOut()
+                }
+            }
         }
+        verifyAndSetLoggedIn()
+        val listener = FirebaseAuth.AuthStateListener { verifyAndSetLoggedIn() }
         auth.addAuthStateListener(listener)
         try {
             awaitCancellation()

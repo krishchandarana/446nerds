@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.savr.data.createUserDocumentWithCallbacks
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.savr.app.ui.theme.SavrColors
@@ -218,24 +219,42 @@ fun CreateAccountScreen(
                         isLoading = true
                         auth.createUserWithEmailAndPassword(email.trim(), password)
                             .addOnSuccessListener { result ->
-                                val displayName = name.trim()
-                                if (displayName.isNotBlank()) {
-                                    val profileUpdates = UserProfileChangeRequest.Builder()
-                                        .setDisplayName(displayName)
-                                        .build()
-                                    result.user?.updateProfile(profileUpdates)
-                                        ?.addOnCompleteListener {
-                                            isLoading = false
-                                            onSuccess()
-                                        }
-                                        ?: run {
-                                            isLoading = false
-                                            onSuccess()
-                                        }
-                                } else {
+                                val uid = result.user?.uid
+                                if (uid == null) {
                                     isLoading = false
-                                    onSuccess()
+                                    errorMessage = "Account created but no user ID. Try signing in."
+                                    return@addOnSuccessListener
                                 }
+                                val displayName = name.trim()
+                                createUserDocumentWithCallbacks(
+                                    uid = uid,
+                                    displayName = displayName,
+                                    username = email.trim(),
+                                    onSuccess = {
+                                        if (displayName.isNotBlank()) {
+                                            val profileUpdates = UserProfileChangeRequest.Builder()
+                                                .setDisplayName(displayName)
+                                                .build()
+                                            result.user?.updateProfile(profileUpdates)
+                                                ?.addOnCompleteListener {
+                                                    isLoading = false
+                                                    onSuccess()
+                                                }
+                                                ?: run {
+                                                    isLoading = false
+                                                    onSuccess()
+                                                }
+                                        } else {
+                                            isLoading = false
+                                            onSuccess()
+                                        }
+                                    },
+                                    onFailure = { e ->
+                                        isLoading = false
+                                        android.util.Log.e("CreateAccount", "Failed to create Firestore user doc", e)
+                                        errorMessage = e.message ?: "Could not save profile."
+                                    }
+                                )
                             }
                             .addOnFailureListener { e ->
                                 isLoading = false
