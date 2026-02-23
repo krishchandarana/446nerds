@@ -7,5 +7,6 @@ package com.example.savr.data
 data class UserProfile(
     val displayName: String = "",
     val username: String = "",
-    val dietaryPreferences: List<String> = emptyList()
+    val dietaryPreferences: List<String> = emptyList(),
+    val groceryList: List<String> = emptyList()
 )

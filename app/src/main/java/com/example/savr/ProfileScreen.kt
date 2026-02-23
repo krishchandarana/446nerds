@@ -25,9 +25,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 private val DIETARY_PREFERENCE_OPTIONS = listOf(
-    "Lactose Intolerance",
+    "Lactose Free",
     "Vegetarian",
-    "Nut Allergy"
+    "Peanut Free"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

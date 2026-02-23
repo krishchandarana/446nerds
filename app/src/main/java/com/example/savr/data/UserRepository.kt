@@ -72,7 +72,8 @@ suspend fun setUserProfile(profile: UserProfile) {
     val data = hashMapOf<String, Any>(
         "displayName" to (profile.displayName.ifBlank { "" }),
         "username" to (profile.username.ifBlank { "" }),
-        "dietaryPreferences" to profile.dietaryPreferences
+        "dietaryPreferences" to profile.dietaryPreferences,
+        "groceryList" to profile.groceryList
     )
     firestore.collection(USERS_COLLECTION).document(uid).set(data).await()
 }
@@ -86,7 +87,8 @@ suspend fun createUserDocument(uid: String, displayName: String, username: Strin
     val data = hashMapOf<String, Any>(
         "displayName" to (displayName.ifBlank { "" }),
         "username" to (username.ifBlank { "" }),
-        "dietaryPreferences" to emptyList<String>()
+        "dietaryPreferences" to emptyList<String>(),
+        "groceryList" to emptyList<String>()
     )
     firestore.collection(USERS_COLLECTION).document(uid).set(data).await()
 }
@@ -106,7 +108,8 @@ fun createUserDocumentWithCallbacks(
     val data = hashMapOf<String, Any>(
         "displayName" to (displayName.ifBlank { "" }),
         "username" to (username.ifBlank { "" }),
-        "dietaryPreferences" to emptyList<String>()
+        "dietaryPreferences" to emptyList<String>(),
+        "groceryList" to emptyList<String>()
     )
     firestore.collection(USERS_COLLECTION).document(uid).set(data)
         .addOnSuccessListener {
