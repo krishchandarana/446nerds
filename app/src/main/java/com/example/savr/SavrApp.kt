@@ -154,6 +154,7 @@ fun SavrApp(modifier: Modifier = Modifier) {
                     NavTab.MEALS -> {
                         if (isComingFromPlan) {
                             // Coming from Plan - allow selection
+                            val hadExistingMealsForDay = (plannedMealsByDay[activeDayIndex]?.isNotEmpty() == true)
                             var tempSelectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
                             
                             // Initialize temp selections with existing planned meals for this day
@@ -165,6 +166,7 @@ fun SavrApp(modifier: Modifier = Modifier) {
                                 recipes = matchedRecipes,
                                 selectedIds = tempSelectedIds,
                                 allowSelection = true,
+                                allowClearWhenEmpty = hadExistingMealsForDay,
                                 onToggleRecipe = { id ->
                                     // Update temporary selections only
                                     tempSelectedIds = if (id in tempSelectedIds) {

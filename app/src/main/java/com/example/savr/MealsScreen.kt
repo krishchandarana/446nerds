@@ -25,6 +25,7 @@ fun MealsScreen(
     recipes: List<Recipe>,
     selectedIds: Set<String> = emptySet(),
     allowSelection: Boolean = false,
+    allowClearWhenEmpty: Boolean = false,
     onToggleRecipe: ((String) -> Unit)? = null,
     onAddToPlan: (() -> Unit)? = null
 ) {
@@ -40,6 +41,12 @@ fun MealsScreen(
         0 -> "No recipes found"
         1 -> "Matched to your fridge · 1 recipe found"
         else -> "Matched to your fridge · $recipeCount recipes found"
+    }
+    val canSubmit = selectedCount > 0 || allowClearWhenEmpty
+    val ctaText = when {
+        selectedCount > 0 -> "Add to Plan →"
+        allowClearWhenEmpty -> "Clear Meal Plan"
+        else -> "Add to Plan →"
     }
 
     Box(modifier = Modifier.fillMaxSize().background(SavrColors.Cream)) {
@@ -110,7 +117,11 @@ fun MealsScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text     = "Tap cards to add or remove",
+                                text     = if (allowClearWhenEmpty) {
+                                    "Tap cards to add/remove · deselect all to clear day"
+                                } else {
+                                    "Tap cards to add or remove"
+                                },
                                 color    = SavrColors.White.copy(alpha = 0.45f),
                                 fontSize = 11.sp,
                                 modifier = Modifier.padding(top = 1.dp)
@@ -120,11 +131,11 @@ fun MealsScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(SavrColors.Sage)
-                                .clickable(enabled = selectedCount > 0) { onAddToPlan() }
+                                .clickable(enabled = canSubmit) { onAddToPlan() }
                                 .padding(horizontal = 18.dp, vertical = 10.dp)
                         ) {
                             Text(
-                                text       = "Add to Plan →",
+                                text       = ctaText,
                                 color      = SavrColors.White,
                                 fontSize   = 13.sp,
                                 fontWeight = FontWeight.Bold
