@@ -118,3 +118,23 @@ fun createUserDocumentWithCallbacks(
             onFailure(e)
         }
 }
+
+/**
+ * Deletes the user document from Firestore (users/{uid}).
+ * Uses callbacks so the UI can wait for the delete to finish.
+ */
+fun deleteUserDocumentWithCallbacks(
+    uid: String,
+    onSuccess: () -> Unit,
+    onFailure: (Exception) -> Unit
+) {
+    firestore.collection(USERS_COLLECTION).document(uid).delete()
+        .addOnSuccessListener {
+            Log.d("UserRepo", "Deleted users/$uid")
+            onSuccess()
+        }
+        .addOnFailureListener { e ->
+            Log.e("UserRepo", "Failed deleting users/$uid", e)
+            onFailure(e)
+        }
+}

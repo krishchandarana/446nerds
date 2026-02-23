@@ -14,16 +14,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.savr.data.UserProfile
+import com.example.savr.data.deleteUserDocumentWithCallbacks
+import com.example.savr.data.setUserProfile
 import com.example.savr.data.userProfileFlow
 import com.google.firebase.auth.FirebaseAuth
 import com.savr.app.ui.components.TagChip
 import com.savr.app.ui.components.TagStyle
 import com.savr.app.ui.theme.SavrColors
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
+private val DIETARY_PREFERENCE_OPTIONS = listOf(
+    "Lactose Intolerance",
+    "Vegetarian",
+    "Nut Allergy"
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen() {
     var profile by remember { mutableStateOf<UserProfile?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         userProfileFlow().collectLatest { profile = it }
@@ -42,6 +53,15 @@ fun ProfileScreen() {
     } ?: authUser?.email?.let { "@${it.substringBefore('@')}" }
         ?: ""
     val dietaryPreferences = profile?.dietaryPreferences ?: emptyList()
+    
+    // State for dropdown
+    var expanded by remember { mutableStateOf(false) }
+    var selectedPreferences by remember { mutableStateOf(emptySet<String>()) }
+    
+    // Update selected preferences when profile changes
+    LaunchedEffect(profile) {
+        selectedPreferences = (profile?.dietaryPreferences ?: emptyList()).toSet()
+    }
 
     Column(
         modifier = Modifier
@@ -82,20 +102,113 @@ fun ProfileScreen() {
         }
 
         SectionCard(title = "DIETARY PREFERENCES") {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(horizontal = 26.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
             ) {
-                if (dietaryPreferences.isEmpty()) {
-                    Text(
-                        text = "None set",
-                        color = SavrColors.TextMuted,
-                        fontSize = 14.sp
+                // Multi-select dropdown
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = if (selectedPreferences.isEmpty()) "Select dietary preferences" else "${selectedPreferences.size} selected",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                            focusedTextColor = SavrColors.Dark,
+                            unfocusedTextColor = SavrColors.Dark,
+                            focusedBorderColor = SavrColors.Sage,
+                            unfocusedBorderColor = SavrColors.TextMuted
+                        ),
+                        shape = RoundedCornerShape(12.dp)
                     )
-                } else {
-                    dietaryPreferences.forEach { pref ->
-                        TagChip(" $pref", TagStyle.SAGE)
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.background(SavrColors.White)
+                    ) {
+                        DIETARY_PREFERENCE_OPTIONS.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = option,
+                                            color = SavrColors.Dark,
+                                            fontSize = 14.sp
+                                        )
+                                        Checkbox(
+                                            checked = selectedPreferences.contains(option),
+                                            onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = SavrColors.Sage,
+                                                uncheckedColor = SavrColors.TextMuted
+                                            )
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    val newSelectedPreferences = if (selectedPreferences.contains(option)) {
+                                        selectedPreferences - option
+                                    } else {
+                                        selectedPreferences + option
+                                    }
+                                    selectedPreferences = newSelectedPreferences
+                                    
+                                    // Save preferences when selection changes
+                                    val currentProfile = profile
+                                    val updatedProfile = if (currentProfile != null) {
+                                        currentProfile.copy(dietaryPreferences = newSelectedPreferences.toList())
+                                    } else {
+                                        // If profile doesn't exist yet, create one with current auth data
+                                        UserProfile(
+                                            displayName = displayName,
+                                            username = authUser?.email ?: "",
+                                            dietaryPreferences = newSelectedPreferences.toList()
+                                        )
+                                    }
+                                    scope.launch {
+                                        try {
+                                            setUserProfile(updatedProfile)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("ProfileScreen", "Failed to save dietary preferences", e)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                // Display selected preferences as chips
+                if (selectedPreferences.isNotEmpty()) {
+                    Spacer(Modifier.height(20.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Selected Preferences",
+                            color = SavrColors.TextMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 10.dp)
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            selectedPreferences.sorted().forEach { pref ->
+                                TagChip(pref, TagStyle.SAGE)
+                            }
+                        }
                     }
                 }
             }
@@ -106,7 +219,33 @@ fun ProfileScreen() {
                 FirebaseAuth.getInstance().signOut()
             })
             HorizontalDivider(color = SavrColors.DividerColour, modifier = Modifier.padding(horizontal = 16.dp))
-            SettingsLinkRow("🗑️", "Delete Account", textColor = SavrColors.Terra)
+            SettingsLinkRow("🗑️", "Delete Account", textColor = SavrColors.Terra, onClick = {
+                val auth = FirebaseAuth.getInstance()
+                val user = auth.currentUser
+                if (user != null) {
+                    val uid = user.uid
+                    // First delete the Firestore document
+                    deleteUserDocumentWithCallbacks(
+                        uid = uid,
+                        onSuccess = {
+                            // Then delete the Firebase Auth user
+                            user.delete()
+                                .addOnSuccessListener {
+                                    // Sign out after successful deletion
+                                    auth.signOut()
+                                }
+                                .addOnFailureListener { e ->
+                                    android.util.Log.e("ProfileScreen", "Failed to delete Auth user", e)
+                                    // Still sign out even if Auth deletion fails
+                                    auth.signOut()
+                                }
+                        },
+                        onFailure = { e ->
+                            android.util.Log.e("ProfileScreen", "Failed to delete Firestore document", e)
+                        }
+                    )
+                }
+            })
         }
     }
 }
