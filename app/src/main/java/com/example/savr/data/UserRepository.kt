@@ -16,6 +16,19 @@ private val firestore: FirebaseFirestore
 private val auth: FirebaseAuth
     get() = FirebaseAuth.getInstance()
 
+private fun parsePlannedMealsField(raw: Any?): List<Map<String, Any>> {
+    val list = raw as? List<*> ?: return emptyList()
+    return list.mapNotNull { item ->
+        val map = item as? Map<*, *> ?: return@mapNotNull null
+        val dayIndex = (map["dayIndex"] as? Number)?.toInt() ?: return@mapNotNull null
+        val recipeIds = (map["recipeIds"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        mapOf(
+            "dayIndex" to dayIndex,
+            "recipeIds" to recipeIds
+        )
+    }
+}
+
 /**
  * Path for the current user's document. Document ID = Firebase Auth UID.
  */
@@ -31,7 +44,19 @@ fun currentUserDocPath(): String? {
 suspend fun getUserProfile(): UserProfile? {
     val uid = auth.currentUser?.uid ?: return null
     val doc = firestore.collection(USERS_COLLECTION).document(uid).get().await()
-    return if (doc.exists()) doc.toObject(UserProfile::class.java) else null
+    if (!doc.exists()) return null
+    
+    val data = doc.data ?: return null
+    return UserProfile(
+        displayName = data["displayName"] as? String ?: "",
+        username = data["username"] as? String ?: "",
+        dietaryPreferences = (data["dietaryPreferences"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+        groceryList = (data["groceryList"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+        currentInventory = (data["currentInventory"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+        generatedMeals = (data["generatedMeals"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+        plannedMeals = parsePlannedMealsField(data["plannedMeals"]),
+        plannedMealsWeekKey = data["plannedMealsWeekKey"] as? String ?: ""
+    )
 }
 
 /**
@@ -57,7 +82,22 @@ fun userProfileFlow(): Flow<UserProfile?> = callbackFlow {
         if (snapshot == null || !snapshot.exists()) {
             trySend(null) // doc truly doesn't exist
         } else {
-            trySend(snapshot.toObject(UserProfile::class.java))
+            val data = snapshot.data
+            if (data != null) {
+                val profile = UserProfile(
+                    displayName = data["displayName"] as? String ?: "",
+                    username = data["username"] as? String ?: "",
+                    dietaryPreferences = (data["dietaryPreferences"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+                    groceryList = (data["groceryList"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+                    currentInventory = (data["currentInventory"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+                    generatedMeals = (data["generatedMeals"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+                    plannedMeals = parsePlannedMealsField(data["plannedMeals"]),
+                    plannedMealsWeekKey = data["plannedMealsWeekKey"] as? String ?: ""
+                )
+                trySend(profile)
+            } else {
+                trySend(null)
+            }
         }
     }
     awaitClose { listener.remove() }
@@ -73,9 +113,21 @@ suspend fun setUserProfile(profile: UserProfile) {
         "displayName" to (profile.displayName.ifBlank { "" }),
         "username" to (profile.username.ifBlank { "" }),
         "dietaryPreferences" to profile.dietaryPreferences,
-        "groceryList" to profile.groceryList
+        "groceryList" to profile.groceryList,
+        "currentInventory" to profile.currentInventory,
+        "generatedMeals" to profile.generatedMeals,
+        "plannedMeals" to profile.plannedMeals,
+        "plannedMealsWeekKey" to profile.plannedMealsWeekKey
     )
-    firestore.collection(USERS_COLLECTION).document(uid).set(data).await()
+    Log.d("UserRepo", "Saving user profile for $uid")
+    Log.d("UserRepo", "Planned meals data: ${profile.plannedMeals}")
+    try {
+        firestore.collection(USERS_COLLECTION).document(uid).set(data).await()
+        Log.d("UserRepo", "Successfully saved user profile to Firestore")
+    } catch (e: Exception) {
+        Log.e("UserRepo", "Error saving user profile to Firestore", e)
+        throw e
+    }
 }
 
 /**
@@ -88,7 +140,11 @@ suspend fun createUserDocument(uid: String, displayName: String, username: Strin
         "displayName" to (displayName.ifBlank { "" }),
         "username" to (username.ifBlank { "" }),
         "dietaryPreferences" to emptyList<String>(),
-        "groceryList" to emptyList<String>()
+        "groceryList" to emptyList<String>(),
+        "currentInventory" to emptyList<String>(),
+        "generatedMeals" to emptyList<String>(),
+        "plannedMeals" to emptyList<Map<String, Any>>(),
+        "plannedMealsWeekKey" to ""
     )
     firestore.collection(USERS_COLLECTION).document(uid).set(data).await()
 }
@@ -109,7 +165,11 @@ fun createUserDocumentWithCallbacks(
         "displayName" to (displayName.ifBlank { "" }),
         "username" to (username.ifBlank { "" }),
         "dietaryPreferences" to emptyList<String>(),
-        "groceryList" to emptyList<String>()
+        "groceryList" to emptyList<String>(),
+        "currentInventory" to emptyList<String>(),
+        "generatedMeals" to emptyList<String>(),
+        "plannedMeals" to emptyList<Map<String, Any>>(),
+        "plannedMealsWeekKey" to ""
     )
     firestore.collection(USERS_COLLECTION).document(uid).set(data)
         .addOnSuccessListener {

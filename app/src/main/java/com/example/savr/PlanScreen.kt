@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,18 +19,42 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.savr.data.getCurrentWeekDays
+import com.example.savr.data.getMonthName
 import com.savr.app.ui.*
 import com.savr.app.ui.components.*
 import com.savr.app.ui.theme.SavrColors
+import java.time.DayOfWeek
+import java.time.LocalDate
 
 @Composable
 fun PlanScreen(
-    plannedMealsByDay: Map<Int, Set<Int>>,
+    recipes: List<Recipe>,
+    plannedMealsByDay: Map<Int, Set<String>>,
     activeDayIndex: Int,
+    currentDayIndex: Int,
     onDaySelected: (Int) -> Unit,
     onNavigateToMeals: () -> Unit,
     onNavigateToGrocery: () -> Unit
 ) {
+    val (weekDays, _) = remember { getCurrentWeekDays() }
+    val dayListState = rememberLazyListState()
+    val today = LocalDate.now()
+    val currentDayOfWeek = today.dayOfWeek
+    val daysFromMonday = when (currentDayOfWeek) {
+        DayOfWeek.MONDAY -> 0
+        DayOfWeek.TUESDAY -> 1
+        DayOfWeek.WEDNESDAY -> 2
+        DayOfWeek.THURSDAY -> 3
+        DayOfWeek.FRIDAY -> 4
+        DayOfWeek.SATURDAY -> 5
+        DayOfWeek.SUNDAY -> 6
+        else -> 0
+    }
+    val monday = today.minusDays(daysFromMonday.toLong())
+    val sunday = monday.plusDays(6)
+    val weekRange = "${getMonthName(monday)} ${monday.dayOfMonth} – ${getMonthName(sunday)} ${sunday.dayOfMonth}"
+    
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -35,7 +62,7 @@ fun PlanScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 90.dp)
     ) {
-        PageHeader(title = "Meal Plan", subtitle = "Week of Feb 17 – Feb 23")
+        PageHeader(title = "Meal Plan", subtitle = "Week of $weekRange")
 
         Box(
             modifier = Modifier
@@ -56,16 +83,23 @@ fun PlanScreen(
             )
         }
 
-        Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 20.dp),
+        LaunchedEffect(currentDayIndex, weekDays.size) {
+            if (weekDays.isNotEmpty()) {
+                dayListState.scrollToItem(currentDayIndex.coerceIn(0, weekDays.lastIndex))
+            }
+        }
+
+        LazyRow(
+            state = dayListState,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            weekDays.forEachIndexed { index, day ->
+            itemsIndexed(weekDays) { index, day ->
                 DayChipItem(
                     day = day,
                     isSelected = activeDayIndex == index,
+                    isToday = index == currentDayIndex,
                     onClick = { onDaySelected(index) }
                 )
             }
@@ -73,8 +107,10 @@ fun PlanScreen(
 
         val dayName = weekDays[activeDayIndex].dayName.uppercase()
         val dayNum = weekDays[activeDayIndex].dayNum
+        val activeDate = monday.plusDays(activeDayIndex.toLong())
+        val monthName = getMonthName(activeDate)
         Text(
-            text       = "$dayName, FEB $dayNum",
+            text       = "$dayName, $monthName $dayNum",
             color      = SavrColors.TextMid,
             fontSize   = 12.sp,
             fontWeight = FontWeight.Bold,
@@ -83,7 +119,7 @@ fun PlanScreen(
         )
 
         val selectedRecipeIds = plannedMealsByDay[activeDayIndex] ?: emptySet()
-        val selectedRecipes = allRecipes.filter { it.id in selectedRecipeIds }
+        val selectedRecipes = recipes.filter { it.id in selectedRecipeIds }
 
         selectedRecipes.forEach {
             FilledMealSlot(recipe = it, onChangeClick = onNavigateToMeals)
@@ -94,8 +130,12 @@ fun PlanScreen(
 }
 
 @Composable
-private fun DayChipItem(day: DayChip, isSelected: Boolean, onClick: () -> Unit) {
-    val bg = if (isSelected) SavrColors.Dark else SavrColors.White
+private fun DayChipItem(day: DayChip, isSelected: Boolean, isToday: Boolean, onClick: () -> Unit) {
+    val bg = when {
+        isSelected -> SavrColors.Dark
+        isToday -> SavrColors.SageTint
+        else -> SavrColors.White
+    }
     val textColor = if (isSelected) SavrColors.White else SavrColors.Dark
     val mutedColor = if (isSelected) SavrColors.White.copy(alpha = 0.6f) else SavrColors.TextMuted
 

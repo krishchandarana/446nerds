@@ -22,15 +22,24 @@ import com.savr.app.ui.theme.SavrColors
 
 @Composable
 fun MealsScreen(
-    selectedIds: Set<Int>,
-    onToggleRecipe: (Int) -> Unit,
-    onNavigateToPlan: () -> Unit
+    recipes: List<Recipe>,
+    selectedIds: Set<String> = emptySet(),
+    allowSelection: Boolean = false,
+    onToggleRecipe: ((String) -> Unit)? = null,
+    onAddToPlan: (() -> Unit)? = null
 ) {
     val selectedCount = selectedIds.size
     val countText = when (selectedCount) {
         0    -> "No meals selected"
         1    -> "1 meal selected"
         else -> "$selectedCount meals selected"
+    }
+    
+    val recipeCount = recipes.size
+    val subtitleText = when (recipeCount) {
+        0 -> "No recipes found"
+        1 -> "Matched to your fridge · 1 recipe found"
+        else -> "Matched to your fridge · $recipeCount recipes found"
     }
 
     Box(modifier = Modifier.fillMaxSize().background(SavrColors.Cream)) {
@@ -43,62 +52,84 @@ fun MealsScreen(
         ) {
             PageHeader(
                 title    = "Select Meals",
-                subtitle = "Matched to your fridge · 7 recipes found"
+                subtitle = subtitleText
             )
 
-            allRecipes.forEach { recipe ->
-                val isSelected = recipe.id in selectedIds
-                RecipeCard(
-                    recipe     = recipe,
-                    isSelected = isSelected,
-                    onToggle   = { onToggleRecipe(recipe.id) }
-                )
+            if (recipes.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No recipes available with your current inventory",
+                        color = SavrColors.TextMuted,
+                        fontSize = 14.sp
+                    )
+                }
+            } else {
+                recipes.forEach { recipe ->
+                    val isSelected = allowSelection && recipe.id in selectedIds
+                    RecipeCard(
+                        recipe     = recipe,
+                        isSelected = isSelected,
+                        onToggle   = if (allowSelection && onToggleRecipe != null) {
+                            { onToggleRecipe(recipe.id) }
+                        } else {
+                            null
+                        }
+                    )
+                }
             }
         }
 
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-        ) {
-            Box(
+        // Only show bottom bar if selection is allowed
+        if (allowSelection && onAddToPlan != null) {
+            Column(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .background(SavrColors.Dark)
-                    .padding(horizontal = 20.dp, vertical = 11.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SavrColors.Dark)
+                        .padding(horizontal = 20.dp, vertical = 11.dp)
                 ) {
-                    Column {
-                        Text(
-                            text       = countText,
-                            color      = SavrColors.White,
-                            fontSize   = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text     = "Tap cards to add or remove",
-                            color    = SavrColors.White.copy(alpha = 0.45f),
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 1.dp)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SavrColors.Sage)
-                            .clickable(enabled = selectedCount > 0) { onNavigateToPlan() }
-                            .padding(horizontal = 18.dp, vertical = 10.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text       = "Add to Plan →",
-                            color      = SavrColors.White,
-                            fontSize   = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Column {
+                            Text(
+                                text       = countText,
+                                color      = SavrColors.White,
+                                fontSize   = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text     = "Tap cards to add or remove",
+                                color    = SavrColors.White.copy(alpha = 0.45f),
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 1.dp)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SavrColors.Sage)
+                                .clickable(enabled = selectedCount > 0) { onAddToPlan() }
+                                .padding(horizontal = 18.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text       = "Add to Plan →",
+                                color      = SavrColors.White,
+                                fontSize   = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -110,7 +141,7 @@ fun MealsScreen(
 fun RecipeCard(
     recipe: Recipe,
     isSelected: Boolean,
-    onToggle: () -> Unit
+    onToggle: (() -> Unit)? = null
 ) {
     val borderColor = if (isSelected) SavrColors.Amber else SavrColors.White.copy(alpha = 0f)
 
@@ -127,7 +158,13 @@ fun RecipeCard(
                 color = borderColor,
                 shape = RoundedCornerShape(18.dp)
             )
-            .clickable { onToggle() }
+            .then(
+                if (onToggle != null) {
+                    Modifier.clickable { onToggle() }
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Column {
             Box(

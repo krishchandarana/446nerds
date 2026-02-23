@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,24 +16,61 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.savr.data.FoodCatalogItem
+import com.example.savr.data.calculateExpiryStatus
+import com.example.savr.data.getAllFoodCatalogItems
+import com.example.savr.data.serializeInventoryItem
 import com.savr.app.ui.CurrentInventoryCategory
 import com.savr.app.ui.CurrentInventoryItem
 import com.savr.app.ui.ExpiryStatus
 import com.savr.app.ui.theme.SavrColors
+import kotlinx.coroutines.launch
+
+// Map foodCatalog category to CurrentInventoryCategory
+private fun mapCategoryToInventoryCategory(category: String): CurrentInventoryCategory {
+    return when (category.lowercase()) {
+        "fruit", "fruits" -> CurrentInventoryCategory.FRUIT
+        "vegetables", "vegetable", "produce" -> CurrentInventoryCategory.VEG
+        "dairy", "dairy & eggs" -> CurrentInventoryCategory.DAIRY
+        "protein", "meat" -> CurrentInventoryCategory.PROTEIN
+        "grain", "grains", "pantry", "baking" -> CurrentInventoryCategory.GRAIN
+        else -> CurrentInventoryCategory.OTHER
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddCurrentInventoryItemSheet(
-    onSave:    (CurrentInventoryItem) -> Unit,
+    onSave:    (serializedItem: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var name          by remember { mutableStateOf("") }
-    var quantity      by remember { mutableStateOf("") }
+    var foodCatalogItems by remember { mutableStateOf<List<FoodCatalogItem>>(emptyList()) }
+    var isLoadingItems by remember { mutableStateOf(true) }
+    var selectedItem by remember { mutableStateOf<FoodCatalogItem?>(null) }
+    var quantity by remember { mutableStateOf("1") }
     var expirationDate by remember { mutableStateOf("") }
-    var selectedCat   by remember { mutableStateOf<CurrentInventoryCategory?>(null) }
-    val canSave = name.isNotBlank() && quantity.isNotBlank() && selectedCat != null
+    var expanded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    
+    LaunchedEffect(Unit) {
+        scope.launch {
+            isLoadingItems = true
+            try {
+                val items = getAllFoodCatalogItems()
+                android.util.Log.d("AddInventoryItemSheet", "Loaded ${items.size} items from foodCatalog")
+                foodCatalogItems = items
+            } catch (e: Exception) {
+                android.util.Log.e("AddInventoryItemSheet", "Error loading food catalog items", e)
+            } finally {
+                isLoadingItems = false
+            }
+        }
+    }
+    
+    val canSave = selectedItem != null && quantity.isNotBlank() && quantity.toIntOrNull() != null && quantity.toInt() > 0 && expirationDate.isNotBlank()
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
@@ -83,18 +121,87 @@ fun AddCurrentInventoryItemSheet(
                 }
             }
             SheetSectionLabel(
-                text     = "Item name",
+                text     = "Select Item",
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
             Spacer(Modifier.height(6.dp))
-            SheetTextField(
-                value         = name,
-                onValueChange = { name = it },
-                placeholder   = "e.g. Spinach, Feta, Eggs…",
-                modifier      = Modifier
+            
+            // Dropdown for food catalog items
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded },
+                modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-            )
+            ) {
+                OutlinedTextField(
+                    value = selectedItem?.let { "${it.emoji} ${it.name}" } ?: "Select an item",
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(),
+                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                        focusedTextColor = SavrColors.Dark,
+                        unfocusedTextColor = SavrColors.Dark,
+                        focusedBorderColor = SavrColors.Sage,
+                        unfocusedBorderColor = Color(0xFFE2DDD5)
+                    ),
+                    shape = RoundedCornerShape(13.dp)
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.background(SavrColors.White)
+                ) {
+                    if (isLoadingItems) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Loading items...",
+                                    color = SavrColors.TextMuted,
+                                    fontSize = 14.sp
+                                )
+                            },
+                            onClick = {}
+                        )
+                    } else if (foodCatalogItems.isEmpty()) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "No items found",
+                                    color = SavrColors.TextMuted,
+                                    fontSize = 14.sp
+                                )
+                            },
+                            onClick = {}
+                        )
+                    } else {
+                        foodCatalogItems.forEach { item ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(item.emoji, fontSize = 18.sp)
+                                        Text(
+                                            text = item.name,
+                                            color = SavrColors.Dark,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedItem = item
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(Modifier.height(14.dp))
             SheetSectionLabel(
@@ -102,67 +209,75 @@ fun AddCurrentInventoryItemSheet(
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
             Spacer(Modifier.height(6.dp))
-            SheetTextField(
-                value         = quantity,
-                onValueChange = { quantity = it },
-                placeholder   = "e.g. 1 bag, 200g, 6 eggs…",
-                modifier      = Modifier
+            
+            // Numerical quantity input
+            Row(
+                modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-            )
-
-            Spacer(Modifier.height(14.dp))
-            SheetSectionLabel(
-                text     = "Category",
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
-            Spacer(Modifier.height(8.dp))
-            val cats = CurrentInventoryCategory.values()
-                .filter { it != CurrentInventoryCategory.ALL }
-
-            Column(
-                modifier              = Modifier.padding(horizontal = 20.dp),
-                verticalArrangement   = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                cats.chunked(3).forEach { rowCats ->
-                    Row(
-                        modifier              = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        rowCats.forEach { cat ->
-                            val isSelected = cat == selectedCat
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        if (isSelected) SavrColors.SageTint else SavrColors.Cream
-                                    )
-                                    .border(
-                                        width = 1.5.dp,
-                                        color = if (isSelected) SavrColors.Sage
-                                                else Color(0xFFE2DDD5),
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { selectedCat = cat }
-                                    .padding(vertical = 10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(cat.emoji, fontSize = 20.sp)
-                                Spacer(Modifier.height(3.dp))
-                                Text(
-                                    text       = cat.label,
-                                    fontSize   = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color      = if (isSelected) SavrColors.Sage
-                                                 else SavrColors.TextMid
-                                )
+                // Decrease button
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SavrColors.CreamMid)
+                        .clickable {
+                            val current = quantity.toIntOrNull() ?: 1
+                            if (current > 1) {
+                                quantity = (current - 1).toString()
                             }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("-", fontSize = 20.sp, color = SavrColors.Dark, fontWeight = FontWeight.Bold)
+                }
+                
+                // Quantity display
+                OutlinedTextField(
+                    value = quantity,
+                    onValueChange = { newValue ->
+                        if (newValue.isEmpty() || (newValue.toIntOrNull() != null && newValue.toInt() > 0)) {
+                            quantity = newValue
                         }
-                        repeat(3 - rowCats.size) {
-                            Spacer(Modifier.weight(1f))
-                        }
-                    }
+                    },
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = SavrColors.Sage,
+                        unfocusedBorderColor = Color(0xFFE2DDD5),
+                        focusedContainerColor = SavrColors.White,
+                        unfocusedContainerColor = SavrColors.Cream,
+                        cursorColor = SavrColors.Sage
+                    ),
+                    shape = RoundedCornerShape(13.dp),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = SavrColors.Dark),
+                    singleLine = true
+                )
+                
+                // Unit display
+                Text(
+                    text = selectedItem?.defaultUnit ?: "",
+                    color = SavrColors.TextMuted,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                
+                // Increase button
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SavrColors.CreamMid)
+                        .clickable {
+                            val current = quantity.toIntOrNull() ?: 1
+                            quantity = (current + 1).toString()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("+", fontSize = 20.sp, color = SavrColors.Dark, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -181,7 +296,7 @@ fun AddCurrentInventoryItemSheet(
                     .padding(horizontal = 20.dp)
             )
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(20.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -190,17 +305,23 @@ fun AddCurrentInventoryItemSheet(
                     .clip(RoundedCornerShape(16.dp))
                     .background(if (canSave) SavrColors.Dark else SavrColors.CreamMid)
                     .clickable(enabled = canSave) {
+                        val item = selectedItem!!
+                        val qty = quantity.toInt()
+                        val quantityWithUnit = "$qty ${item.defaultUnit}"
+                        val inventoryCategory = mapCategoryToInventoryCategory(item.category)
+                        val expiryStatus = calculateExpiryStatus(expirationDate.trim())
                         val newItem = CurrentInventoryItem(
-                            id          = System.currentTimeMillis().toInt(), // temp id
-                            emoji       = selectedCat!!.emoji,
-                            name        = name.trim(),
-                            quantity    = quantity.trim(),
-                            expiryLabel = expirationDate,
-                            status      = ExpiryStatus.FRESH,
-                            category    = selectedCat!!
+                            id = System.currentTimeMillis().toInt(),
+                            emoji = item.emoji,
+                            name = item.name,
+                            quantity = quantityWithUnit,
+                            expiryLabel = expirationDate.trim(),
+                            status = expiryStatus,
+                            category = inventoryCategory
                         )
-                        onSave(newItem)
-
+                        // Save with the database category (from foodCatalog), not the mapped enum
+                        val serialized = serializeInventoryItem(newItem, item.category)
+                        onSave(serialized)
                     },
                 contentAlignment = Alignment.Center
             ) {

@@ -7,6 +7,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import com.example.savr.data.UserProfile
+import com.example.savr.data.deserializePlannedMeals
+import com.example.savr.data.deserializeRecipes
+import com.example.savr.data.getCurrentWeekDays
+import com.example.savr.data.getCurrentWeekKey
+import com.example.savr.data.serializePlannedMeals
+import com.example.savr.data.setUserProfile
+import com.example.savr.data.userProfileFlow
 import com.savr.app.ui.components.SavrBottomNav
 import com.savr.app.ui.screens.CurrentInventory.CurrentInventoryScreen
 import com.savr.app.ui.screens.grocery.GroceryScreen
@@ -15,6 +24,7 @@ import com.savr.app.ui.screens.login.LoginScreen
 import com.savr.app.ui.screens.meals.MealsScreen
 import com.savr.app.ui.screens.plan.PlanScreen
 import com.savr.app.ui.screens.profile.ProfileScreen
+import kotlinx.coroutines.flow.collect
 
 @Composable
 fun SavrApp(modifier: Modifier = Modifier) {
@@ -69,11 +79,61 @@ fun SavrApp(modifier: Modifier = Modifier) {
 
     var currentTab by remember { mutableStateOf(NavTab.PLAN) }
     var plannedMealsByDay by remember {
-        mutableStateOf(mapOf(1 to setOf(1, 2))) 
+        mutableStateOf(mapOf<Int, Set<String>>()) 
     }
     
-    var activeDayIndex by remember { mutableStateOf(1) }
+    // Get current week days and today's index
+    val (_, currentDayIndex) = remember { getCurrentWeekDays() }
+    val currentWeekKey = remember { getCurrentWeekKey() }
+    var activeDayIndex by remember { mutableStateOf(currentDayIndex) }
+    var matchedRecipes by remember { mutableStateOf<List<Recipe>>(emptyList()) }
+    var isComingFromPlan by remember { mutableStateOf(false) }
+    // Use a coroutine scope that persists across composition changes
+    val saveScope = rememberCoroutineScope()
+    
+    // Load generated meals and planned meals from user profile on startup
+    var profile by remember { mutableStateOf<UserProfile?>(null) }
+    
+    LaunchedEffect(Unit) {
+        userProfileFlow().collect { p ->
+            profile = p
+            if (p != null) {
+                // Keep generated meals in sync with backend state.
+                val savedRecipes = deserializeRecipes(p.generatedMeals)
+                if (savedRecipes.isNotEmpty() || matchedRecipes.isEmpty()) {
+                    matchedRecipes = savedRecipes
+                }
 
+                // Clear planned meals automatically when entering a new week.
+                val storedWeekKey = p.plannedMealsWeekKey
+                if (storedWeekKey.isNotBlank() && storedWeekKey != currentWeekKey) {
+                    plannedMealsByDay = emptyMap()
+                    android.util.Log.d("SavrApp", "New week detected ($storedWeekKey -> $currentWeekKey). Clearing planned meals.")
+                    saveScope.launch {
+                        try {
+                            val clearedProfile = p.copy(
+                                plannedMeals = emptyList(),
+                                plannedMealsWeekKey = currentWeekKey
+                            )
+                            setUserProfile(clearedProfile)
+                            android.util.Log.d("SavrApp", "Cleared last week's planned meals in Firestore")
+                        } catch (e: Exception) {
+                            android.util.Log.e("SavrApp", "Failed to clear last week's planned meals", e)
+                        }
+                    }
+                } else {
+                    // Week is current (or missing key for legacy docs), load saved meals.
+                    plannedMealsByDay = deserializePlannedMeals(p.plannedMeals)
+                    android.util.Log.d("SavrApp", "Loaded planned meals for week $currentWeekKey: $plannedMealsByDay")
+                }
+            } else {
+                matchedRecipes = emptyList()
+                plannedMealsByDay = emptyMap()
+                android.util.Log.d("SavrApp", "No profile available; cleared local meal state")
+            }
+        }
+    }
+    
     Column(modifier = modifier) {
 
         Box(modifier = Modifier.weight(1f)) {
@@ -84,29 +144,92 @@ fun SavrApp(modifier: Modifier = Modifier) {
             ) { tab ->
                 when (tab) {
                     NavTab.CURRENTINVENTORY  -> CurrentInventoryScreen(
-                        onNavigateToMeals = { 
+                        onNavigateToMeals = { recipes ->
+                            matchedRecipes = recipes
                             activeDayIndex = 1 // Default to Tuesday or some logic
+                            isComingFromPlan = false // View-only when coming from inventory
                             currentTab = NavTab.MEALS 
                         }
                     )
-                    NavTab.MEALS -> MealsScreen(
-                        selectedIds = plannedMealsByDay[activeDayIndex] ?: emptySet(),
-                        onToggleRecipe = { id ->
-                            val currentDayMeals = plannedMealsByDay[activeDayIndex] ?: emptySet()
-                            val newDayMeals = if (id in currentDayMeals) {
-                                currentDayMeals - id
-                            } else {
-                                currentDayMeals + id
+                    NavTab.MEALS -> {
+                        if (isComingFromPlan) {
+                            // Coming from Plan - allow selection
+                            var tempSelectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+                            
+                            // Initialize temp selections with existing planned meals for this day
+                            LaunchedEffect(activeDayIndex) {
+                                tempSelectedIds = plannedMealsByDay[activeDayIndex] ?: emptySet()
                             }
-                            plannedMealsByDay = plannedMealsByDay + (activeDayIndex to newDayMeals)
-                        },
-                        onNavigateToPlan = { currentTab = NavTab.PLAN }
-                    )
+                            
+                            MealsScreen(
+                                recipes = matchedRecipes,
+                                selectedIds = tempSelectedIds,
+                                allowSelection = true,
+                                onToggleRecipe = { id ->
+                                    // Update temporary selections only
+                                    tempSelectedIds = if (id in tempSelectedIds) {
+                                        tempSelectedIds - id
+                                    } else {
+                                        tempSelectedIds + id
+                                    }
+                                },
+                                onAddToPlan = {
+                                    // Save temporary selections to the plan for the active day
+                                    val updatedPlannedMeals = plannedMealsByDay.toMutableMap()
+                                    if (tempSelectedIds.isEmpty()) {
+                                        // Remove the day if no meals selected
+                                        updatedPlannedMeals.remove(activeDayIndex)
+                                    } else {
+                                        // Update the day with selected meals
+                                        updatedPlannedMeals[activeDayIndex] = tempSelectedIds
+                                    }
+                                    plannedMealsByDay = updatedPlannedMeals
+                                    android.util.Log.d("SavrApp", "Updated planned meals for day $activeDayIndex: $tempSelectedIds")
+                                    
+                                    // Save directly to database to avoid cancellation issues
+                                    val currentProfile = profile
+                                    if (currentProfile != null) {
+                                        saveScope.launch {
+                                            try {
+                                                val serialized = serializePlannedMeals(updatedPlannedMeals)
+                                                android.util.Log.d("SavrApp", "Serialized planned meals: $serialized")
+                                                val updatedProfile = currentProfile.copy(
+                                                    plannedMeals = serialized,
+                                                    plannedMealsWeekKey = currentWeekKey
+                                                )
+                                                setUserProfile(updatedProfile)
+                                                android.util.Log.d("SavrApp", "Successfully saved planned meals after adding: ${updatedPlannedMeals.size} days")
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("SavrApp", "Failed to save planned meals after adding", e)
+                                                e.printStackTrace()
+                                            }
+                                        }
+                                    } else {
+                                        android.util.Log.w("SavrApp", "Cannot save planned meals: profile is null")
+                                    }
+                                    
+                                    isComingFromPlan = false
+                                    currentTab = NavTab.PLAN
+                                }
+                            )
+                        } else {
+                            // Coming from Inventory - view only, no selection
+                            MealsScreen(
+                                recipes = matchedRecipes,
+                                allowSelection = false
+                            )
+                        }
+                    }
                     NavTab.PLAN    -> PlanScreen(
+                        recipes = matchedRecipes,
                         plannedMealsByDay = plannedMealsByDay,
                         activeDayIndex = activeDayIndex,
+                        currentDayIndex = currentDayIndex,
                         onDaySelected = { activeDayIndex = it },
-                        onNavigateToMeals   = { currentTab = NavTab.MEALS },
+                        onNavigateToMeals   = { 
+                            isComingFromPlan = true // Enable selection when coming from plan
+                            currentTab = NavTab.MEALS 
+                        },
                         onNavigateToGrocery = { currentTab = NavTab.GROCERY }
                     )
                     NavTab.GROCERY -> GroceryScreen()
@@ -116,7 +239,12 @@ fun SavrApp(modifier: Modifier = Modifier) {
         }
         SavrBottomNav(
             currentTab    = currentTab,
-            onTabSelected = { currentTab = it }
+            onTabSelected = { 
+                // Clear the "coming from plan" flag when manually switching tabs
+                // This ensures Meals tab is view-only unless coming from Plan
+                isComingFromPlan = false
+                currentTab = it 
+            }
         )
     }
 }

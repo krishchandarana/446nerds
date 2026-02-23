@@ -16,24 +16,117 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.savr.data.UserProfile
+import com.example.savr.data.deserializeInventoryItem
+import com.example.savr.data.deserializeRecipes
+import com.example.savr.data.filterRecipesByInventory
+import com.example.savr.data.getAllRecipes
+import com.example.savr.data.getCategoryFromInventorySerialized
+import com.example.savr.data.mapRecipeCatalogToRecipe
+import com.example.savr.data.serializeRecipes
+import com.example.savr.data.setUserProfile
+import com.example.savr.data.userProfileFlow
 import com.savr.app.ui.*
 import com.savr.app.ui.components.*
 import com.savr.app.ui.theme.SavrColors
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+
+// Required categories that should always be displayed (same as grocery)
+private val REQUIRED_CATEGORIES = listOf(
+    "Fruit",
+    "Produce",
+    "Spices",
+    "Bakery",
+    "Beverages",
+    "Dairy & Eggs",
+    "Meat",
+    "Condiments",
+    "Pantry",
+    "Baking"
+)
+
+// Category emoji mapping (same as GroceryScreen)
+private fun getCategoryEmoji(category: String): String {
+    return when (category.lowercase()) {
+        "fruit" -> "🍎"
+        "produce" -> "🥬"
+        "spices" -> "🌶️"
+        "bakery" -> "🥖"
+        "beverages" -> "🥤"
+        "dairy & eggs", "dairy", "eggs" -> "🥛"
+        "meat" -> "🥩"
+        "condiments" -> "🍯"
+        "pantry" -> "🥫"
+        "baking" -> "🧁"
+        "vegetables", "vegetable" -> "🥦"
+        "protein" -> "🥩"
+        "grain", "grains" -> "🌾"
+        else -> "🥄"
+    }
+}
 
 @Composable
-fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
-    var selectedCategory by remember { mutableStateOf(CurrentInventoryCategory.ALL) }
+fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
+    var profile by remember { mutableStateOf<UserProfile?>(null) }
     var showAddSheet by remember { mutableStateOf(false) }
-    val items = remember { mutableStateListOf(*CurrentInventoryItems.toTypedArray()) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        userProfileFlow().collectLatest { profile = it }
+    }
 
     if (showAddSheet) {
         AddCurrentInventoryItemSheet(
-            onSave = { newItem ->
-                items.add(newItem)
-                showAddSheet = false
+            onSave = { serializedItem ->
+                val currentProfile = profile
+                if (currentProfile != null) {
+                    val updatedList = currentProfile.currentInventory + serializedItem
+                    val updatedProfile = currentProfile.copy(currentInventory = updatedList)
+                    scope.launch {
+                        try {
+                            setUserProfile(updatedProfile)
+                            showAddSheet = false
+                        } catch (e: Exception) {
+                            android.util.Log.e("CurrentInventoryScreen", "Failed to save inventory item", e)
+                        }
+                    }
+                } else {
+                    showAddSheet = false
+                }
             },
             onDismiss = { showAddSheet = false }
         )
+    }
+
+    // Group items by database category (same as grocery)
+    val itemsByCategory = remember(profile?.currentInventory) {
+        val items = profile?.currentInventory ?: emptyList()
+        items.mapIndexedNotNull { index, serialized ->
+            val item = deserializeInventoryItem(serialized, index)
+            val category = getCategoryFromInventorySerialized(serialized) ?: "Other"
+            if (item != null) {
+                Triple(category, item, index)
+            } else {
+                null
+            }
+        }.groupBy { it.first }
+    }
+
+    // Create a map that includes all required categories, even if empty
+    val allCategoriesWithItems = remember(itemsByCategory) {
+        val result = mutableMapOf<String, List<Triple<String, CurrentInventoryItem, Int>>>()
+        // Add all required categories first
+        REQUIRED_CATEGORIES.forEach { category ->
+            result[category] = itemsByCategory[category] ?: emptyList()
+        }
+        // Add any other categories that have items but aren't in the required list
+        itemsByCategory.forEach { (category, items) ->
+            if (category !in REQUIRED_CATEGORIES) {
+                result[category] = items
+            }
+        }
+        result
     }
 
     Box(modifier = Modifier.fillMaxSize().background(SavrColors.Cream)) {
@@ -51,7 +144,47 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                     .padding(bottom = 16.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(SavrColors.SageTint)
-                    .clickable { onNavigateToMeals() }
+                    .clickable {
+                        // Fetch recipes and filter by inventory
+                        scope.launch {
+                            try {
+                                val allRecipes = getAllRecipes()
+                                // Extract all inventory items from the grouped categories
+                                val inventoryItems = allCategoriesWithItems.values
+                                    .flatten()
+                                    .map { it.second } // Extract CurrentInventoryItem from Triple
+                                android.util.Log.d("CurrentInventoryScreen", "Inventory items: ${inventoryItems.map { it.name }}")
+                                val matchedRecipes = filterRecipesByInventory(allRecipes, inventoryItems)
+                                android.util.Log.d("CurrentInventoryScreen", "Matched ${matchedRecipes.size} recipes")
+                                val recipesForDisplay = matchedRecipes.map { catalogItem ->
+                                    // Use the Firestore document ID directly
+                                    mapRecipeCatalogToRecipe(catalogItem, inventoryItems = inventoryItems)
+                                }
+                                
+                                // Save generated meals to user profile
+                                val currentProfile = profile
+                                if (currentProfile != null) {
+                                    val serializedMeals = serializeRecipes(recipesForDisplay)
+                                    val updatedProfile = currentProfile.copy(generatedMeals = serializedMeals)
+                                    try {
+                                        setUserProfile(updatedProfile)
+                                        android.util.Log.d("CurrentInventoryScreen", "Saved ${recipesForDisplay.size} generated meals to profile")
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("CurrentInventoryScreen", "Failed to save generated meals", e)
+                                    }
+                                }
+                                
+                                onNavigateToMeals(recipesForDisplay)
+                            } catch (e: Exception) {
+                                android.util.Log.e("CurrentInventoryScreen", "Error fetching recipes", e)
+                                if (e.message?.contains("PERMISSION_DENIED") == true) {
+                                    android.util.Log.e("CurrentInventoryScreen", "PERMISSION_DENIED: Update Firestore security rules to allow read access to 'recipeCatalog' collection")
+                                }
+                                // Navigate with empty list on error
+                                onNavigateToMeals(emptyList())
+                            }
+                        }
+                    }
                     .padding(horizontal = 16.dp, vertical = 15.dp)
             ) {
                 Row(
@@ -60,7 +193,7 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Generate Meal Plan",
+                            text = "Generate Meals",
                             color = SavrColors.Dark2,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
@@ -81,38 +214,52 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
                 }
             }
 
-            Row(
-                modifier = Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp)
-            ) {
-                CurrentInventoryCategory.values().forEach { cat ->
-                    val label = if (cat == CurrentInventoryCategory.ALL) "All"
-                                else "${cat.emoji} ${cat.label}"
-                    FilterPill(
-                        text     = label,
-                        isActive = selectedCategory == cat,
-                        onClick  = { selectedCategory = cat }
+            // Display all categories grouped by database category
+            allCategoriesWithItems.forEach { (category, items) ->
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .padding(top = 8.dp, bottom = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(getCategoryEmoji(category), fontSize = 14.sp)
+                        Text(
+                            text = category.uppercase(),
+                            color = SavrColors.TextMid,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+                    HorizontalDivider(
+                        color = SavrColors.DividerColour,
+                        modifier = Modifier.padding(horizontal = 20.dp)
                     )
                 }
-            }
-
-            if (selectedCategory == CurrentInventoryCategory.ALL) {
-                CurrentInventoryCategory.values()
-                    .filter { it != CurrentInventoryCategory.ALL }
-                    .forEach { cat ->
-                        val catItems = items.filter { it.category == cat }
-                        if (catItems.isNotEmpty()) {
-                            SectionHeader("${cat.emoji} ${cat.label.uppercase()}")
-                            catItems.forEach { item -> CurrentInventoryItemRow(item) }
-                            Spacer(Modifier.height(4.dp))
+                
+                items.forEach { (_, item, index) ->
+                    CurrentInventoryItemRow(
+                        item = item,
+                        onDelete = {
+                            val currentProfile = profile
+                            if (currentProfile != null) {
+                                val updatedList = currentProfile.currentInventory.toMutableList()
+                                updatedList.removeAt(index)
+                                val updatedProfile = currentProfile.copy(currentInventory = updatedList)
+                                scope.launch {
+                                    try {
+                                        setUserProfile(updatedProfile)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("CurrentInventoryScreen", "Failed to delete inventory item", e)
+                                    }
+                                }
+                            }
                         }
-                    }
-            } else {
-                val filteredItems = items.filter { it.category == selectedCategory }
-                filteredItems.forEach { item -> CurrentInventoryItemRow(item) }
+                    )
+                }
             }
         }
         Box(
@@ -131,7 +278,7 @@ fun CurrentInventoryScreen(onNavigateToMeals: () -> Unit) {
 }
 
 @Composable
-fun CurrentInventoryItemRow(item: CurrentInventoryItem) {
+fun CurrentInventoryItemRow(item: CurrentInventoryItem, onDelete: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = SavrColors.White,
@@ -146,6 +293,18 @@ fun CurrentInventoryItemRow(item: CurrentInventoryItem) {
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
             horizontalArrangement = Arrangement.spacedBy(11.dp)
         ) {
+            // Delete button
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(SavrColors.TerraTint)
+                    .clickable { onDelete() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("✕", color = SavrColors.Terra, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            
             Text(item.emoji, fontSize = 22.sp, modifier = Modifier.width(30.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(item.name,     color = SavrColors.Dark,     fontSize = 14.sp, fontWeight = FontWeight.Medium)
