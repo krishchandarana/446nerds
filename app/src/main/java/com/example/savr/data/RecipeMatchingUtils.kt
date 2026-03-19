@@ -1,126 +1,256 @@
 package com.example.savr.data
 
-import com.example.savr.data.deserializeInventoryItem
+import androidx.compose.ui.graphics.Color
 import com.savr.app.ui.CurrentInventoryItem
 import com.savr.app.ui.ExpiryStatus
 import com.savr.app.ui.Recipe
 import com.savr.app.ui.theme.SavrColors
-import androidx.compose.ui.graphics.Color
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
-/**
- * Scores a recipe based on ingredient availability and expiry urgency
- * Higher score = better match (uses more expiring ingredients)
- * 
- * Scoring:
- * - Base score: number of matched ingredients
- * - Bonus: URGENT items = +1000, WARNING items = +100, FRESH items = +10
- * - Quantity doesn't matter, just presence
- */
+private val inventoryDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+
+private fun normalizeComparableName(value: String): String {
+    return value.trim()
+        .lowercase()
+        .replace("_", " ")
+        .replace(Regex("[^a-z0-9 ]"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+}
+
+private fun normalizeComparableTokenKey(value: String): String {
+    return normalizeComparableName(value)
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .sorted()
+        .joinToString(" ")
+}
+
+private data class InventoryIngredientMatch(
+    val availableQuantity: Int,
+    val requiredQuantity: Int,
+    val matchedItemCount: Int,
+    val nearestStatus: ExpiryStatus?
+)
+
+private fun normalizeUnit(unit: String): String {
+    return unit.trim().lowercase().removeSuffix("s")
+}
+
+private fun parseInventoryQuantity(quantity: String): Pair<Int, String>? {
+    val match = Regex("""^(\d+)\s*(.*)$""").find(quantity.trim()) ?: return null
+    val amount = match.groupValues[1].toIntOrNull() ?: return null
+    val unit = normalizeUnit(match.groupValues[2])
+    return amount to unit
+}
+
+private fun parseExpiryDateOrNull(value: String): LocalDate? {
+    return try {
+        LocalDate.parse(value.trim(), inventoryDateFormatter)
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun isInventoryItemExpired(item: CurrentInventoryItem): Boolean {
+    val expiryDate = parseExpiryDateOrNull(item.expiryLabel) ?: return false
+    return expiryDate.isBefore(LocalDate.now())
+}
+
+private fun recipeSatisfiesDiet(
+    recipe: RecipeCatalogItem,
+    dietaryPreferences: List<String>
+): Boolean {
+    if (dietaryPreferences.isEmpty()) return true
+
+    val normalizedRestrictions = recipe.dietaryRestrictions.map { it.trim().lowercase() }
+    val normalizedFlags = recipe.dietaryFlags.mapKeys { it.key.trim().lowercase() }
+
+    return dietaryPreferences.all { preference ->
+        when (preference.trim().lowercase()) {
+            "vegetarian" -> normalizedFlags["vegetarian"] == true ||
+                normalizedRestrictions.contains("vegetarian")
+            "lactose free" -> normalizedFlags["lactosefree"] == true ||
+                normalizedFlags["lactose_free"] == true ||
+                normalizedRestrictions.contains("lactose free")
+            "peanut free" -> normalizedFlags["peanutfree"] == true ||
+                normalizedFlags["peanut_free"] == true ||
+                normalizedRestrictions.contains("peanut free")
+            else -> true
+        }
+    }
+}
+
+private fun findIngredientMatch(
+    ingredient: RecipeIngredient,
+    inventoryItems: List<CurrentInventoryItem>
+): InventoryIngredientMatch {
+    val ingredientName = normalizeComparableName(ingredient.foodId)
+    val ingredientTokenKey = normalizeComparableTokenKey(ingredient.foodId)
+    val matchingItems = inventoryItems.filter {
+        val inventoryName = normalizeComparableName(it.name)
+        (inventoryName == ingredientName || normalizeComparableTokenKey(it.name) == ingredientTokenKey) &&
+            !isInventoryItemExpired(it)
+    }
+
+    if (matchingItems.isEmpty()) {
+        return InventoryIngredientMatch(
+            availableQuantity = 0,
+            requiredQuantity = ingredient.quantity.coerceAtLeast(1),
+            matchedItemCount = 0,
+            nearestStatus = null
+        )
+    }
+
+    val requiredQuantity = ingredient.quantity.coerceAtLeast(1)
+    val normalizedRequiredUnit = normalizeUnit(ingredient.unit)
+    var availableQuantity = 0
+
+    matchingItems.forEach { item ->
+        val parsed = parseInventoryQuantity(item.quantity)
+        if (parsed != null) {
+            val (qty, unit) = parsed
+            if (normalizedRequiredUnit.isBlank() || unit.isBlank() || unit == normalizedRequiredUnit) {
+                availableQuantity += qty
+            }
+        } else {
+            availableQuantity += 1
+        }
+    }
+
+    val nearestStatus = matchingItems.minByOrNull {
+        parseExpiryDateOrNull(it.expiryLabel) ?: LocalDate.MAX
+    }?.status
+
+    return InventoryIngredientMatch(
+        availableQuantity = availableQuantity,
+        requiredQuantity = requiredQuantity,
+        matchedItemCount = matchingItems.size,
+        nearestStatus = nearestStatus
+    )
+}
+
 fun scoreRecipe(
     recipe: RecipeCatalogItem,
-    inventoryItemsByName: Map<String, CurrentInventoryItem>
+    inventoryItems: List<CurrentInventoryItem>,
+    dietaryPreferences: List<String>
 ): Double {
-    if (recipe.ingredients.isEmpty()) {
+    if (recipe.ingredients.isEmpty() || !recipeSatisfiesDiet(recipe, dietaryPreferences)) {
         return 0.0
     }
-    
+
     var score = 0.0
-    var matchedCount = 0
-    
+    var coveredIngredients = 0
+    var partialIngredients = 0
+
     recipe.ingredients.forEach { ingredient ->
-        val foodIdLower = ingredient.foodId.lowercase()
-        val inventoryItem = inventoryItemsByName[foodIdLower]
-        
-        if (inventoryItem != null) {
-            matchedCount++
-            // Add bonus based on expiry status (prioritize expiring items)
-            when (inventoryItem.status) {
-                ExpiryStatus.URGENT -> score += 1000.0
-                ExpiryStatus.WARNING -> score += 100.0
-                ExpiryStatus.FRESH -> score += 10.0
-            }
+        val match = findIngredientMatch(ingredient, inventoryItems)
+        if (match.availableQuantity <= 0) return@forEach
+
+        if (match.availableQuantity >= match.requiredQuantity) {
+            coveredIngredients++
+            score += 100.0
+        } else {
+            partialIngredients++
+            score += 40.0 * (match.availableQuantity.toDouble() / match.requiredQuantity.toDouble())
+        }
+
+        score += when (match.nearestStatus) {
+            ExpiryStatus.URGENT -> 80.0
+            ExpiryStatus.WARNING -> 25.0
+            ExpiryStatus.FRESH -> 5.0
+            null -> 0.0
         }
     }
-    
-    // Base score: percentage of ingredients matched (0-1) * 100
-    val matchPercentage = if (recipe.ingredients.isNotEmpty()) {
-        matchedCount.toDouble() / recipe.ingredients.size
-    } else {
-        0.0
-    }
-    
-    // Combine: match percentage + expiry bonuses
-    return (matchPercentage * 100) + score
+
+    val coverageRatio = (coveredIngredients + (partialIngredients * 0.5)) / recipe.ingredients.size.toDouble()
+    return score + (coverageRatio * 150.0)
 }
 
-/**
- * Filters and ranks recipes by ingredient availability and expiry urgency
- * Returns top 7 recipes that use ingredients with closest expiration dates
- */
 fun filterRecipesByInventory(
     recipes: List<RecipeCatalogItem>,
-    inventoryItems: List<CurrentInventoryItem>
+    inventoryItems: List<CurrentInventoryItem>,
+    dietaryPreferences: List<String> = emptyList()
 ): List<RecipeCatalogItem> {
-    // Create a map for quick lookup: item name (lowercase) -> inventory item
-    val inventoryItemsByName = inventoryItems.associateBy { it.name.lowercase() }
-    
-    // Score all recipes and filter out those with no matches
-    val scoredRecipes = recipes.mapNotNull { recipe ->
-        val score = scoreRecipe(recipe, inventoryItemsByName)
-        if (score > 0) {
-            Pair(recipe, score)
-        } else {
-            null
+    val usableInventory = inventoryItems.filterNot(::isInventoryItemExpired)
+    fun rankCandidates(
+        candidates: List<RecipeCatalogItem>,
+        enforcedDietaryPreferences: List<String>
+    ): List<Pair<RecipeCatalogItem, Double>> {
+        return candidates
+            .map { recipe ->
+                recipe to scoreRecipe(recipe, usableInventory, enforcedDietaryPreferences)
+            }
+            .sortedWith(
+                compareByDescending<Pair<RecipeCatalogItem, Double>> { it.second }
+                    .thenBy { it.first.ingredients.size }
+                    .thenBy { it.first.prepTimeMinutes }
+            )
+    }
+
+    val selectedRecipes = linkedSetOf<RecipeCatalogItem>()
+
+    val strictRanked = rankCandidates(
+        candidates = recipes.filter { recipeSatisfiesDiet(it, dietaryPreferences) },
+        enforcedDietaryPreferences = dietaryPreferences
+    )
+
+    strictRanked
+        .filter { it.second > 0.0 }
+        .forEach { (recipe, _) ->
+            if (selectedRecipes.size < 7) selectedRecipes.add(recipe)
+        }
+
+    strictRanked
+        .filter { it.second <= 0.0 }
+        .forEach { (recipe, _) ->
+            if (selectedRecipes.size < 7) selectedRecipes.add(recipe)
+        }
+
+    if (selectedRecipes.size < 7) {
+        rankCandidates(
+            candidates = recipes.filter { candidate -> selectedRecipes.none { it.id == candidate.id } },
+            enforcedDietaryPreferences = emptyList()
+        ).forEach { (recipe, _) ->
+            if (selectedRecipes.size < 7) selectedRecipes.add(recipe)
         }
     }
-    
-    // Sort by score (highest first) and take top 7
-    return scoredRecipes
-        .sortedByDescending { it.second }
-        .take(7)
-        .map { it.first }
+
+    return selectedRecipes.toList().take(7)
 }
 
-/**
- * Maps a RecipeCatalogItem from the database to a Recipe for display
- */
 fun mapRecipeCatalogToRecipe(
     catalogItem: RecipeCatalogItem,
     isSelected: Boolean = false,
     inventoryItems: List<CurrentInventoryItem>? = null
 ): Recipe {
-    // Count matched ingredients if inventory is provided
-    val matchedCount = if (inventoryItems != null) {
-        val inventoryItemsByName = inventoryItems.associateBy { it.name.lowercase() }
-        catalogItem.ingredients.count { ingredient ->
-            inventoryItemsByName.containsKey(ingredient.foodId.lowercase())
-        }
-    } else {
-        catalogItem.ingredients.size
+    val usableInventory = inventoryItems?.filterNot(::isInventoryItemExpired).orEmpty()
+    val ingredientMatches = catalogItem.ingredients.map { ingredient ->
+        findIngredientMatch(ingredient, usableInventory)
     }
-    
-    // Determine badge based on match count
+    val matchedCount = ingredientMatches.count { it.availableQuantity > 0 }
+    val expiringCount = ingredientMatches.count {
+        it.availableQuantity > 0 && (it.nearestStatus == ExpiryStatus.URGENT || it.nearestStatus == ExpiryStatus.WARNING)
+    }
+
     val matchBadge = when {
-        matchedCount == catalogItem.ingredients.size -> "✓ All ingredients"
+        expiringCount > 0 -> "⚡ Uses $expiringCount near-expiry item${if (expiringCount == 1) "" else "s"}"
+        matchedCount == catalogItem.ingredients.size && matchedCount > 0 -> "✓ All ingredients"
         matchedCount > 0 -> "✓ $matchedCount/${catalogItem.ingredients.size} ingredients"
         else -> "✓ Available"
     }
-    
-    // Use Sage color for matched recipes
-    val badgeColor = SavrColors.Sage
-    val gradientStart = Color(0xFFEBF3EC)
-    val gradientEnd = Color(0x667A9E7E)
-    
+
     return Recipe(
-        id = catalogItem.id, // Use the Firestore document ID
+        id = catalogItem.id,
         emoji = catalogItem.emoji,
         name = catalogItem.title,
         calories = catalogItem.calories,
         minutes = catalogItem.prepTimeMinutes,
         matchBadge = matchBadge,
-        badgeColor = badgeColor,
-        gradientStart = gradientStart,
-        gradientEnd = gradientEnd,
+        badgeColor = if (expiringCount > 0) SavrColors.Terra else SavrColors.Sage,
+        gradientStart = Color(0xFFEBF3EC),
+        gradientEnd = Color(0x667A9E7E),
         isSelected = isSelected
     )
 }

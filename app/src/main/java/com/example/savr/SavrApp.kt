@@ -9,8 +9,12 @@ import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import com.example.savr.data.UserProfile
+import com.example.savr.data.buildMergedGroceryListForRecipes
 import com.example.savr.data.deserializePlannedMeals
 import com.example.savr.data.deserializeRecipes
+import com.example.savr.data.deserializeInventoryItem
+import com.example.savr.data.getAllFoodCatalogItems
+import com.example.savr.data.getAllRecipes
 import com.example.savr.data.getCurrentWeekDays
 import com.example.savr.data.getCurrentWeekKey
 import com.example.savr.data.serializePlannedMeals
@@ -133,6 +137,29 @@ fun SavrApp(modifier: Modifier = Modifier) {
             }
         }
     }
+
+    suspend fun buildPlannedMealGroceryList(
+        currentProfile: UserProfile,
+        updatedPlannedMeals: Map<Int, Set<String>>
+    ): List<String> {
+        val plannedRecipeIds = updatedPlannedMeals.values.flatten().toSet()
+        if (plannedRecipeIds.isEmpty()) {
+            return currentProfile.groceryList
+        }
+
+        val recipeCatalog = getAllRecipes()
+        val foodCatalog = getAllFoodCatalogItems()
+        val inventoryItems = currentProfile.currentInventory.mapIndexedNotNull { index, serialized ->
+            deserializeInventoryItem(serialized, index)
+        }
+        return buildMergedGroceryListForRecipes(
+            existingGroceryList = currentProfile.groceryList,
+            plannedRecipeIds = plannedRecipeIds,
+            recipeCatalog = recipeCatalog,
+            inventoryItems = inventoryItems,
+            foodCatalogItems = foodCatalog
+        )
+    }
     
     Column(modifier = modifier) {
 
@@ -194,10 +221,15 @@ fun SavrApp(modifier: Modifier = Modifier) {
                                         saveScope.launch {
                                             try {
                                                 val serialized = serializePlannedMeals(updatedPlannedMeals)
+                                                val mergedGroceryList = buildPlannedMealGroceryList(
+                                                    currentProfile = currentProfile,
+                                                    updatedPlannedMeals = updatedPlannedMeals
+                                                )
                                                 android.util.Log.d("SavrApp", "Serialized planned meals: $serialized")
                                                 val updatedProfile = currentProfile.copy(
                                                     plannedMeals = serialized,
-                                                    plannedMealsWeekKey = currentWeekKey
+                                                    plannedMealsWeekKey = currentWeekKey,
+                                                    groceryList = mergedGroceryList
                                                 )
                                                 setUserProfile(updatedProfile)
                                                 android.util.Log.d("SavrApp", "Successfully saved planned meals after adding: ${updatedPlannedMeals.size} days")
@@ -232,7 +264,26 @@ fun SavrApp(modifier: Modifier = Modifier) {
                             isComingFromPlan = true // Enable selection when coming from plan
                             currentTab = NavTab.MEALS 
                         },
-                        onNavigateToGrocery = { currentTab = NavTab.GROCERY }
+                        onNavigateToGrocery = {
+                            val currentProfile = profile
+                            if (currentProfile == null) {
+                                currentTab = NavTab.GROCERY
+                            } else {
+                                saveScope.launch {
+                                    try {
+                                        val mergedGroceryList = buildPlannedMealGroceryList(
+                                            currentProfile = currentProfile,
+                                            updatedPlannedMeals = plannedMealsByDay
+                                        )
+                                        setUserProfile(currentProfile.copy(groceryList = mergedGroceryList))
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("SavrApp", "Failed to build grocery list from plan", e)
+                                    } finally {
+                                        currentTab = NavTab.GROCERY
+                                    }
+                                }
+                            }
+                        }
                     )
                     NavTab.GROCERY -> GroceryScreen()
                     NavTab.PROFILE -> ProfileScreen()

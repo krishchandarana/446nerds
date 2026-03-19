@@ -75,6 +75,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     debugImplementation(libs.androidx.ui.tooling)
 }

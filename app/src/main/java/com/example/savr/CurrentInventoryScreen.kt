@@ -17,9 +17,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.savr.data.UserProfile
+import com.example.savr.data.buildMergedGroceryListForRecipes
 import com.example.savr.data.deserializeInventoryItem
 import com.example.savr.data.deserializeRecipes
 import com.example.savr.data.filterRecipesByInventory
+import com.example.savr.data.getAllFoodCatalogItems
 import com.example.savr.data.getAllRecipes
 import com.example.savr.data.getCategoryFromInventorySerialized
 import com.example.savr.data.mapRecipeCatalogToRecipe
@@ -31,6 +33,8 @@ import com.savr.app.ui.components.*
 import com.savr.app.ui.theme.SavrColors
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 // Required categories that should always be displayed (same as grocery)
 private val REQUIRED_CATEGORIES = listOf(
@@ -66,6 +70,75 @@ private fun getCategoryEmoji(category: String): String {
     }
 }
 
+private data class InventoryBatch(
+    val item: CurrentInventoryItem,
+    val index: Int
+)
+
+private data class InventoryGroup(
+    val key: String,
+    val name: String,
+    val emoji: String,
+    val totalQuantityLabel: String,
+    val earliestExpiryLabel: String,
+    val earliestStatus: ExpiryStatus,
+    val batches: List<InventoryBatch>
+)
+
+private fun parseInventoryDateOrNull(value: String): LocalDate? {
+    return try {
+        LocalDate.parse(value.trim(), DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun summarizeQuantities(items: List<CurrentInventoryItem>): String {
+    val parsed = items.mapNotNull { item ->
+        val match = Regex("""^(\d+)\s*(.*)$""").find(item.quantity.trim()) ?: return@mapNotNull null
+        val amount = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
+        amount to match.groupValues[2].trim()
+    }
+
+    if (parsed.size != items.size || parsed.isEmpty()) {
+        return "${items.size} batches"
+    }
+
+    val distinctUnits = parsed.map { it.second.lowercase() }.distinct()
+    if (distinctUnits.size != 1) {
+        return "${items.size} batches"
+    }
+
+    val total = parsed.sumOf { it.first }
+    val unit = parsed.first().second
+    return listOf(total.toString(), unit).filter { it.isNotBlank() }.joinToString(" ")
+}
+
+private fun buildInventoryGroups(
+    category: String,
+    batches: List<InventoryBatch>
+): List<InventoryGroup> {
+    return batches
+        .groupBy { it.item.name.lowercase() }
+        .map { (_, groupedBatches) ->
+            val sortedBatches = groupedBatches.sortedWith(
+                compareBy<InventoryBatch> { parseInventoryDateOrNull(it.item.expiryLabel) ?: LocalDate.MAX }
+                    .thenBy { it.item.quantity }
+            )
+            val earliestBatch = sortedBatches.first()
+            InventoryGroup(
+                key = "$category|${earliestBatch.item.name.lowercase()}",
+                name = earliestBatch.item.name,
+                emoji = earliestBatch.item.emoji,
+                totalQuantityLabel = summarizeQuantities(sortedBatches.map { it.item }),
+                earliestExpiryLabel = earliestBatch.item.expiryLabel,
+                earliestStatus = earliestBatch.item.status,
+                batches = sortedBatches
+            )
+        }
+        .sortedBy { parseInventoryDateOrNull(it.earliestExpiryLabel) ?: LocalDate.MAX }
+}
+
 @Composable
 fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
     var profile by remember { mutableStateOf<UserProfile?>(null) }
@@ -78,10 +151,10 @@ fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
 
     if (showAddSheet) {
         AddCurrentInventoryItemSheet(
-            onSave = { serializedItem ->
+            onSave = { serializedItems ->
                 val currentProfile = profile
                 if (currentProfile != null) {
-                    val updatedList = currentProfile.currentInventory + serializedItem
+                    val updatedList = currentProfile.currentInventory + serializedItems
                     val updatedProfile = currentProfile.copy(currentInventory = updatedList)
                     scope.launch {
                         try {
@@ -106,28 +179,32 @@ fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
             val item = deserializeInventoryItem(serialized, index)
             val category = getCategoryFromInventorySerialized(serialized) ?: "Other"
             if (item != null) {
-                Triple(category, item, index)
+                category to InventoryBatch(item = item, index = index)
             } else {
                 null
             }
-        }.groupBy { it.first }
+        }.groupBy(
+            keySelector = { it.first },
+            valueTransform = { it.second }
+        )
     }
 
     // Create a map that includes all required categories, even if empty
     val allCategoriesWithItems = remember(itemsByCategory) {
-        val result = mutableMapOf<String, List<Triple<String, CurrentInventoryItem, Int>>>()
+        val result = mutableMapOf<String, List<InventoryGroup>>()
         // Add all required categories first
         REQUIRED_CATEGORIES.forEach { category ->
-            result[category] = itemsByCategory[category] ?: emptyList()
+            result[category] = buildInventoryGroups(category, itemsByCategory[category] ?: emptyList())
         }
         // Add any other categories that have items but aren't in the required list
         itemsByCategory.forEach { (category, items) ->
             if (category !in REQUIRED_CATEGORIES) {
-                result[category] = items
+                result[category] = buildInventoryGroups(category, items)
             }
         }
         result
     }
+    val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
     Box(modifier = Modifier.fillMaxSize().background(SavrColors.Cream)) {
         Column(
@@ -149,12 +226,18 @@ fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
                         scope.launch {
                             try {
                                 val allRecipes = getAllRecipes()
+                                val foodCatalogItems = getAllFoodCatalogItems()
+                                val currentProfile = profile
                                 // Extract all inventory items from the grouped categories
                                 val inventoryItems = allCategoriesWithItems.values
                                     .flatten()
-                                    .map { it.second } // Extract CurrentInventoryItem from Triple
+                                    .flatMap { group -> group.batches.map { it.item } }
                                 android.util.Log.d("CurrentInventoryScreen", "Inventory items: ${inventoryItems.map { it.name }}")
-                                val matchedRecipes = filterRecipesByInventory(allRecipes, inventoryItems)
+                                val matchedRecipes = filterRecipesByInventory(
+                                    recipes = allRecipes,
+                                    inventoryItems = inventoryItems,
+                                    dietaryPreferences = currentProfile?.dietaryPreferences ?: emptyList()
+                                )
                                 android.util.Log.d("CurrentInventoryScreen", "Matched ${matchedRecipes.size} recipes")
                                 val recipesForDisplay = matchedRecipes.map { catalogItem ->
                                     // Use the Firestore document ID directly
@@ -162,10 +245,19 @@ fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
                                 }
                                 
                                 // Save generated meals to user profile
-                                val currentProfile = profile
                                 if (currentProfile != null) {
                                     val serializedMeals = serializeRecipes(recipesForDisplay)
-                                    val updatedProfile = currentProfile.copy(generatedMeals = serializedMeals)
+                                    val mergedGroceryList = buildMergedGroceryListForRecipes(
+                                        existingGroceryList = currentProfile.groceryList,
+                                        plannedRecipeIds = matchedRecipes.map { it.id }.toSet(),
+                                        recipeCatalog = allRecipes,
+                                        inventoryItems = inventoryItems,
+                                        foodCatalogItems = foodCatalogItems
+                                    )
+                                    val updatedProfile = currentProfile.copy(
+                                        generatedMeals = serializedMeals,
+                                        groceryList = mergedGroceryList
+                                    )
                                     try {
                                         setUserProfile(updatedProfile)
                                         android.util.Log.d("CurrentInventoryScreen", "Saved ${recipesForDisplay.size} generated meals to profile")
@@ -209,7 +301,12 @@ fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
                             .background(SavrColors.Sage),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("→", color = SavrColors.White, fontSize = 20.sp)
+                        Text(
+                            text = "→",
+                            color = SavrColors.White,
+                            fontSize = 20.sp,
+                            modifier = Modifier.wrapContentSize(Alignment.Center)
+                        )
                     }
                 }
             }
@@ -240,25 +337,38 @@ fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
                     )
                 }
                 
-                items.forEach { (_, item, index) ->
-                    CurrentInventoryItemRow(
-                        item = item,
-                        onDelete = {
-                            val currentProfile = profile
-                            if (currentProfile != null) {
-                                val updatedList = currentProfile.currentInventory.toMutableList()
-                                updatedList.removeAt(index)
-                                val updatedProfile = currentProfile.copy(currentInventory = updatedList)
-                                scope.launch {
-                                    try {
-                                        setUserProfile(updatedProfile)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("CurrentInventoryScreen", "Failed to delete inventory item", e)
-                                    }
-                                }
-                            }
+                items.forEach { group ->
+                    val isExpanded = expandedGroups[group.key] == true
+                    CurrentInventoryGroupRow(
+                        group = group,
+                        isExpanded = isExpanded,
+                        onToggleExpanded = {
+                            expandedGroups[group.key] = !isExpanded
                         }
                     )
+
+                    if (isExpanded) {
+                        group.batches.forEach { batch ->
+                            CurrentInventoryBatchRow(
+                                item = batch.item,
+                                onDelete = {
+                                    val currentProfile = profile
+                                    if (currentProfile != null) {
+                                        val updatedList = currentProfile.currentInventory.toMutableList()
+                                        updatedList.removeAt(batch.index)
+                                        val updatedProfile = currentProfile.copy(currentInventory = updatedList)
+                                        scope.launch {
+                                            try {
+                                                setUserProfile(updatedProfile)
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("CurrentInventoryScreen", "Failed to delete inventory item", e)
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -278,7 +388,11 @@ fun CurrentInventoryScreen(onNavigateToMeals: (List<Recipe>) -> Unit) {
 }
 
 @Composable
-fun CurrentInventoryItemRow(item: CurrentInventoryItem, onDelete: () -> Unit) {
+private fun CurrentInventoryGroupRow(
+    group: InventoryGroup,
+    isExpanded: Boolean,
+    onToggleExpanded: () -> Unit
+) {
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = SavrColors.White,
@@ -287,13 +401,50 @@ fun CurrentInventoryItemRow(item: CurrentInventoryItem, onDelete: () -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .padding(bottom = 7.dp)
+            .clickable { onToggleExpanded() }
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
             horizontalArrangement = Arrangement.spacedBy(11.dp)
         ) {
-            // Delete button
+            Text(group.emoji, fontSize = 22.sp, modifier = Modifier.width(30.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(group.name, color = SavrColors.Dark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = "${group.totalQuantityLabel} total • ${group.batches.size} ${if (group.batches.size == 1) "batch" else "batches"}",
+                    color = SavrColors.TextMuted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                ExpiryBadge(label = group.earliestExpiryLabel, status = group.earliestStatus)
+                Text(
+                    text = if (isExpanded) "Hide" else "Show",
+                    color = SavrColors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CurrentInventoryBatchRow(item: CurrentInventoryItem, onDelete: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = SavrColors.CreamMid,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 56.dp, end = 20.dp, bottom = 7.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Box(
                 modifier = Modifier
                     .size(22.dp)
@@ -304,12 +455,22 @@ fun CurrentInventoryItemRow(item: CurrentInventoryItem, onDelete: () -> Unit) {
             ) {
                 Text("✕", color = SavrColors.Terra, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
-            
-            Text(item.emoji, fontSize = 22.sp, modifier = Modifier.width(30.dp))
+
             Column(modifier = Modifier.weight(1f)) {
-                Text(item.name,     color = SavrColors.Dark,     fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Text(item.quantity, color = SavrColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 1.dp))
+                Text(
+                    text = item.quantity,
+                    color = SavrColors.Dark,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "Separate expiry batch",
+                    color = SavrColors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
             }
+
             ExpiryBadge(label = item.expiryLabel, status = item.status)
         }
     }
