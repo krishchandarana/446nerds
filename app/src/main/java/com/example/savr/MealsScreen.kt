@@ -13,12 +13,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.savr.app.ui.*
 import com.savr.app.ui.components.*
 import com.savr.app.ui.theme.SavrColors
+
+private fun String.toPrettyLabel(): String {
+    return this
+        .replace("_", " ")
+        .replace(Regex("([a-z])([A-Z])"), "$1 $2")
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { token ->
+            token.lowercase().replaceFirstChar { char ->
+                if (char.isLowerCase()) char.titlecase() else char.toString()
+            }
+        }
+}
 
 @Composable
 fun MealsScreen(
@@ -29,6 +44,7 @@ fun MealsScreen(
     onToggleRecipe: ((String) -> Unit)? = null,
     onAddToPlan: (() -> Unit)? = null
 ) {
+    var selectedRecipeForModal by remember { mutableStateOf<Recipe?>(null) }
     val selectedCount = selectedIds.size
     val countText = when (selectedCount) {
         0    -> "No meals selected"
@@ -81,6 +97,7 @@ fun MealsScreen(
                     RecipeCard(
                         recipe     = recipe,
                         isSelected = isSelected,
+                        onOpenRecipe = { selectedRecipeForModal = recipe },
                         onToggle   = if (allowSelection && onToggleRecipe != null) {
                             { onToggleRecipe(recipe.id) }
                         } else {
@@ -145,6 +162,13 @@ fun MealsScreen(
                 }
             }
         }
+
+        selectedRecipeForModal?.let { recipe ->
+            RecipeDetailsModal(
+                recipe = recipe,
+                onDismiss = { selectedRecipeForModal = null }
+            )
+        }
     }
 }
 
@@ -152,6 +176,7 @@ fun MealsScreen(
 fun RecipeCard(
     recipe: Recipe,
     isSelected: Boolean,
+    onOpenRecipe: () -> Unit,
     onToggle: (() -> Unit)? = null
 ) {
     val borderColor = if (isSelected) SavrColors.Amber else SavrColors.White.copy(alpha = 0f)
@@ -170,11 +195,7 @@ fun RecipeCard(
                 shape = RoundedCornerShape(18.dp)
             )
             .then(
-                if (onToggle != null) {
-                    Modifier.clickable { onToggle() }
-                } else {
-                    Modifier
-                }
+                Modifier.clickable { onOpenRecipe() }
             )
     ) {
         Column {
@@ -208,6 +229,13 @@ fun RecipeCard(
                                 color = SavrColors.White.copy(alpha = 0.8f),
                                 shape = CircleShape
                             ) else Modifier
+                        )
+                        .then(
+                            if (onToggle != null) {
+                                Modifier.clickable { onToggle() }
+                            } else {
+                                Modifier
+                            }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -227,6 +255,16 @@ fun RecipeCard(
                     color    = SavrColors.Dark,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
+                if (recipe.description.isNotBlank()) {
+                    Text(
+                        text = recipe.description,
+                        color = SavrColors.TextMuted,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     MetaPill(" ${recipe.calories} cal")
                     MetaPill(" ${recipe.minutes} min")
@@ -234,4 +272,113 @@ fun RecipeCard(
             }
         }
     }
+}
+
+@Composable
+private fun RecipeDetailsModal(
+    recipe: Recipe,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        title = {},
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${recipe.emoji} ${recipe.name}",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = SavrColors.Dark,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "✕",
+                        fontSize = 18.sp,
+                        color = SavrColors.TextMuted,
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .clickable { onDismiss() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MetaPill(" ${recipe.calories} cal")
+                    MetaPill(" ${recipe.minutes} min")
+                    MetaPill(" Difficulty ${recipe.difficulty}")
+                }
+
+                if (recipe.description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Description",
+                        fontWeight = FontWeight.Bold,
+                        color = SavrColors.Dark
+                    )
+                    Text(
+                        text = recipe.description,
+                        color = SavrColors.TextMuted,
+                        fontSize = 14.sp
+                    )
+                }
+
+                if (recipe.ingredients.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Ingredients",
+                        fontWeight = FontWeight.Bold,
+                        color = SavrColors.Dark
+                    )
+                    recipe.ingredients.forEach { ingredient ->
+                        Text(
+                            text = "• ${ingredient.foodId.toPrettyLabel()}: ${ingredient.quantity} ${ingredient.unit}",
+                            color = SavrColors.TextMuted,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+
+                if (recipe.dietaryRestrictions.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Dietary Restrictions",
+                        fontWeight = FontWeight.Bold,
+                        color = SavrColors.Dark
+                    )
+                    recipe.dietaryRestrictions.forEach { restriction ->
+                        Text(
+                            text = "• $restriction",
+                            color = SavrColors.TextMuted,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+
+                if (recipe.dietaryFlags.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Dietary Flags",
+                        fontWeight = FontWeight.Bold,
+                        color = SavrColors.Dark
+                    )
+                    recipe.dietaryFlags.forEach { (flag, value) ->
+                        Text(
+                            text = "• ${flag.toPrettyLabel()}: ${if (value) "Yes" else "No"}",
+                            color = SavrColors.TextMuted,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+    )
 }

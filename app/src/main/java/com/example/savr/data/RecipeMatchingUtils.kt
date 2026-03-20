@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import com.savr.app.ui.CurrentInventoryItem
 import com.savr.app.ui.ExpiryStatus
 import com.savr.app.ui.Recipe
+import com.savr.app.ui.RecipeIngredientDetail
 import com.savr.app.ui.theme.SavrColors
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -247,6 +248,17 @@ fun mapRecipeCatalogToRecipe(
         name = catalogItem.title,
         calories = catalogItem.calories,
         minutes = catalogItem.prepTimeMinutes,
+        description = catalogItem.description,
+        difficulty = catalogItem.difficulty,
+        dietaryFlags = catalogItem.dietaryFlags,
+        dietaryRestrictions = catalogItem.dietaryRestrictions,
+        ingredients = catalogItem.ingredients.map {
+            RecipeIngredientDetail(
+                foodId = it.foodId,
+                quantity = it.quantity,
+                unit = it.unit
+            )
+        },
         matchBadge = matchBadge,
         badgeColor = if (expiringCount > 0) SavrColors.Terra else SavrColors.Sage,
         gradientStart = Color(0xFFEBF3EC),

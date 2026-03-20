@@ -38,11 +38,22 @@ data class Recipe(
     val name: String,
     val calories: Int,
     val minutes: Int,
+    val description: String = "",
+    val difficulty: Int = 1,
+    val dietaryFlags: Map<String, Boolean> = emptyMap(),
+    val dietaryRestrictions: List<String> = emptyList(),
+    val ingredients: List<RecipeIngredientDetail> = emptyList(),
     val matchBadge: String,
     val badgeColor: Color,
     val gradientStart: Color,
     val gradientEnd: Color,
     val isSelected: Boolean = false
+)
+
+data class RecipeIngredientDetail(
+    val foodId: String,
+    val quantity: Int,
+    val unit: String
 )
 
 data class DayChip(

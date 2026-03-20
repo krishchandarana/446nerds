@@ -17,6 +17,7 @@ import com.example.savr.data.getAllFoodCatalogItems
 import com.example.savr.data.getAllRecipes
 import com.example.savr.data.getCurrentWeekDays
 import com.example.savr.data.getCurrentWeekKey
+import com.example.savr.data.mapRecipeCatalogToRecipe
 import com.example.savr.data.serializePlannedMeals
 import com.example.savr.data.setUserProfile
 import com.example.savr.data.userProfileFlow
@@ -94,6 +95,7 @@ fun SavrApp(modifier: Modifier = Modifier) {
     var isComingFromPlan by remember { mutableStateOf(false) }
     // Use a coroutine scope that persists across composition changes
     val saveScope = rememberCoroutineScope()
+    var recipeCatalogCache by remember { mutableStateOf<Map<String, Recipe>>(emptyMap()) }
     
     // Load generated meals and planned meals from user profile on startup
     var profile by remember { mutableStateOf<UserProfile?>(null) }
@@ -104,8 +106,42 @@ fun SavrApp(modifier: Modifier = Modifier) {
             if (p != null) {
                 // Keep generated meals in sync with backend state.
                 val savedRecipes = deserializeRecipes(p.generatedMeals)
-                if (savedRecipes.isNotEmpty() || matchedRecipes.isEmpty()) {
-                    matchedRecipes = savedRecipes
+                val needsRecipeEnrichment = savedRecipes.any {
+                    it.description.isBlank() || it.ingredients.isEmpty()
+                }
+                val hydratedRecipes = if (needsRecipeEnrichment) {
+                    try {
+                        if (recipeCatalogCache.isEmpty()) {
+                            recipeCatalogCache = getAllRecipes()
+                                .associate { item ->
+                                    item.id to mapRecipeCatalogToRecipe(item)
+                                }
+                        }
+                        savedRecipes.map { saved ->
+                            val catalogRecipe = recipeCatalogCache[saved.id]
+                            if (catalogRecipe != null &&
+                                (saved.description.isBlank() || saved.ingredients.isEmpty())
+                            ) {
+                                saved.copy(
+                                    description = catalogRecipe.description,
+                                    difficulty = catalogRecipe.difficulty,
+                                    dietaryFlags = catalogRecipe.dietaryFlags,
+                                    dietaryRestrictions = catalogRecipe.dietaryRestrictions,
+                                    ingredients = catalogRecipe.ingredients
+                                )
+                            } else {
+                                saved
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("SavrApp", "Failed to enrich saved recipes", e)
+                        savedRecipes
+                    }
+                } else {
+                    savedRecipes
+                }
+                if (hydratedRecipes.isNotEmpty() || matchedRecipes.isEmpty()) {
+                    matchedRecipes = hydratedRecipes
                 }
 
                 // Clear planned meals automatically when entering a new week.
