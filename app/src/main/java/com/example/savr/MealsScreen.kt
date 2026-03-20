@@ -135,9 +135,9 @@ fun MealsScreen(
                             )
                             Text(
                                 text     = if (allowClearWhenEmpty) {
-                                    "Tap cards to add/remove · deselect all to clear day"
+                                    "Tap cards or check icon to add/remove · deselect all to clear day"
                                 } else {
-                                    "Tap cards to add or remove"
+                                    "Tap cards or check icon to add or remove"
                                 },
                                 color    = SavrColors.White.copy(alpha = 0.45f),
                                 fontSize = 11.sp,
@@ -195,7 +195,11 @@ fun RecipeCard(
                 shape = RoundedCornerShape(18.dp)
             )
             .then(
-                Modifier.clickable { onOpenRecipe() }
+                if (onToggle != null) {
+                    Modifier.clickable { onToggle() }
+                } else {
+                    Modifier
+                }
             )
     ) {
         Column {
@@ -268,6 +272,21 @@ fun RecipeCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     MetaPill(" ${recipe.calories} cal")
                     MetaPill(" ${recipe.minutes} min")
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onOpenRecipe) {
+                        Text(
+                            text = "View Full Description",
+                            color = SavrColors.Sage,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }
