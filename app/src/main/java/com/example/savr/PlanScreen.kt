@@ -64,25 +64,6 @@ fun PlanScreen(
     ) {
         PageHeader(title = "Meal Plan", subtitle = "Week of $weekRange")
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(top = 12.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(SavrColors.Sage)
-                .clickable { onNavigateToGrocery() }
-                .padding(vertical = 10.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text       = "Generate Grocery List",
-                color      = SavrColors.White,
-                fontSize   = 13.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-
         LaunchedEffect(currentDayIndex, weekDays.size) {
             if (weekDays.isNotEmpty()) {
                 dayListState.scrollToItem(currentDayIndex.coerceIn(0, weekDays.lastIndex))
