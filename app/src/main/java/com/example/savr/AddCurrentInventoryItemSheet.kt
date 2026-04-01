@@ -25,13 +25,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -62,8 +66,10 @@ import com.savr.app.ui.CurrentInventoryCategory
 import com.savr.app.ui.CurrentInventoryItem
 import com.savr.app.ui.theme.SavrColors
 import java.io.File
+import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.ZoneId
 
 private enum class AddInventoryMode {
     MANUAL,
@@ -88,10 +94,31 @@ private fun mapCategoryToInventoryCategory(category: String): CurrentInventoryCa
     }
 }
 
+private val inventoryDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+
 private fun defaultReceiptExpiryDate(): String {
     return LocalDate.now()
         .plusDays(7)
-        .format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+        .format(inventoryDateFormatter)
+}
+
+private fun parseInventoryDateOrNull(value: String): LocalDate? {
+    return try {
+        LocalDate.parse(value.trim(), inventoryDateFormatter)
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun LocalDate.toPickerMillis(): Long {
+    return atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+}
+
+private fun pickerMillisToDateString(value: Long): String {
+    return Instant.ofEpochMilli(value)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDate()
+        .format(inventoryDateFormatter)
 }
 
 private fun createReceiptImageUri(context: Context): Uri {
@@ -387,14 +414,14 @@ fun AddCurrentInventoryItemSheet(
 
                 Spacer(Modifier.height(14.dp))
                 SheetSectionLabel(
-                    text = "Best-by date (DD/MM/YYYY)",
+                    text = "Best-by date",
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
                 Spacer(Modifier.height(6.dp))
-                SheetTextField(
+                DatePickerField(
                     value = expirationDate,
-                    onValueChange = { expirationDate = it },
-                    placeholder = "DD/MM/YYYY",
+                    label = "Best-by date",
+                    onDateSelected = { expirationDate = it },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
@@ -682,22 +709,11 @@ private fun ReceiptDraftRow(
 
             Spacer(Modifier.height(8.dp))
 
-            OutlinedTextField(
+            DatePickerField(
                 value = draft.expiryDate,
-                onValueChange = { onUpdate(draft.copy(expiryDate = it)) },
-                placeholder = { Text("DD/MM/YYYY", color = SavrColors.TextMuted, fontSize = 14.sp) },
-                label = { Text("Best-by date", color = SavrColors.TextMid) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SavrColors.Sage,
-                    unfocusedBorderColor = Color(0xFFE2DDD5),
-                    focusedContainerColor = SavrColors.White,
-                    unfocusedContainerColor = SavrColors.Cream,
-                    cursorColor = SavrColors.Sage
-                ),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = SavrColors.Dark)
+                label = "Best-by date",
+                onDateSelected = { onUpdate(draft.copy(expiryDate = it)) },
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
@@ -901,28 +917,98 @@ private fun SheetSectionLabel(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SheetTextField(
-    value:         String,
-    onValueChange: (String) -> Unit,
-    placeholder:   String,
-    modifier:      Modifier = Modifier
+private fun DatePickerField(
+    value: String,
+    label: String,
+    onDateSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    OutlinedTextField(
-        value         = value,
-        onValueChange = onValueChange,
-        placeholder   = {
-            Text(placeholder, color = SavrColors.TextMuted, fontSize = 15.sp)
+    var showPicker by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier.clickable { showPicker = true }
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            enabled = false,
+            label = { Text(label, color = SavrColors.TextMid) },
+            placeholder = {
+                Text("Select a date", color = SavrColors.TextMuted, fontSize = 15.sp)
+            },
+            trailingIcon = {
+                Text(
+                    text = "📅",
+                    color = SavrColors.TextMuted,
+                    fontSize = 16.sp
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(13.dp),
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                disabledTextColor = SavrColors.Dark,
+                disabledBorderColor = Color(0xFFE2DDD5),
+                disabledContainerColor = SavrColors.Cream,
+                disabledLabelColor = SavrColors.TextMid,
+                disabledPlaceholderColor = SavrColors.TextMuted,
+                disabledTrailingIconColor = SavrColors.TextMuted,
+                focusedBorderColor = SavrColors.Sage,
+                unfocusedBorderColor = Color(0xFFE2DDD5),
+                focusedContainerColor = SavrColors.White,
+                unfocusedContainerColor = SavrColors.Cream,
+                cursorColor = SavrColors.Sage
+            ),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = SavrColors.Dark)
+        )
+    }
+
+    if (showPicker) {
+        InventoryDatePickerDialog(
+            initialDate = value,
+            onDismiss = { showPicker = false },
+            onDateSelected = {
+                onDateSelected(it)
+                showPicker = false
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InventoryDatePickerDialog(
+    initialDate: String,
+    onDismiss: () -> Unit,
+    onDateSelected: (String) -> Unit
+) {
+    val initialSelectedDateMillis = parseInventoryDateOrNull(initialDate)?.toPickerMillis()
+        ?: LocalDate.now().toPickerMillis()
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialSelectedDateMillis)
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val selectedDateMillis = datePickerState.selectedDateMillis
+                    if (selectedDateMillis != null) {
+                        onDateSelected(pickerMillisToDateString(selectedDateMillis))
+                    } else {
+                        onDismiss()
+                    }
+                }
+            ) {
+                Text("OK")
+            }
         },
-        modifier      = modifier,
-        shape         = RoundedCornerShape(13.dp),
-        singleLine    = true,
-        colors        = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor      = SavrColors.Sage,
-            unfocusedBorderColor    = Color(0xFFE2DDD5),
-            focusedContainerColor   = SavrColors.White,
-            unfocusedContainerColor = SavrColors.Cream,
-            cursorColor             = SavrColors.Sage
-        ),
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = SavrColors.Dark)
-    )
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    ) {
+        DatePicker(state = datePickerState)
+    }
 }

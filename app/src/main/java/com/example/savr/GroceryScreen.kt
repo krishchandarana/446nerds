@@ -16,9 +16,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.savr.data.GROCERY_SOURCE_RECIPE
+import com.example.savr.data.GROCERY_SOURCE_USER
 import com.example.savr.data.UserProfile
 import com.example.savr.data.deserializeGroceryItem
 import com.example.savr.data.getCategoryFromSerialized
+import com.example.savr.data.getGrocerySource
+import com.example.savr.data.mergeSerializedGroceryItems
 import com.example.savr.data.setUserProfile
 import com.example.savr.data.userProfileFlow
 import com.savr.app.ui.GroceryItem
@@ -40,6 +44,111 @@ private val REQUIRED_CATEGORIES = listOf(
     "Pantry",
     "Baking"
 )
+
+private data class GroceryDisplayItem(
+    val category: String,
+    val item: GroceryItem,
+    val rawIndices: List<Int>,
+    val isChecked: Boolean,
+    val sourceNote: String
+)
+
+private data class GroceryDisplayBucket(
+    val category: String,
+    val emoji: String,
+    val name: String,
+    val unit: String,
+    var quantity: Int,
+    val rawIndices: MutableList<Int>,
+    var allChecked: Boolean,
+    val sources: MutableSet<String>
+)
+
+private fun normalizeGroceryName(value: String): String {
+    return value.trim()
+        .lowercase()
+        .replace("_", " ")
+        .replace(Regex("[^a-z0-9 ]"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+}
+
+private fun normalizeGroceryUnit(value: String): String {
+    return value.trim().lowercase().removeSuffix("s")
+}
+
+private fun parseGroceryQuantityLabel(quantity: String): Pair<Int, String>? {
+    val match = Regex("""^(\d+)\s*(.*)$""").find(quantity.trim()) ?: return null
+    val amount = match.groupValues[1].toIntOrNull() ?: return null
+    return amount to normalizeGroceryUnit(match.groupValues[2])
+}
+
+private fun buildSourceNote(sources: Set<String>): String {
+    val hasUser = GROCERY_SOURCE_USER in sources
+    val hasRecipe = GROCERY_SOURCE_RECIPE in sources
+    return when {
+        hasUser && hasRecipe -> "Added manually and missing from recipe"
+        hasRecipe -> "Missing recipe ingredient"
+        else -> "Added manually"
+    }
+}
+
+private fun buildCombinedGroceryItems(items: List<String>): Map<String, List<GroceryDisplayItem>> {
+    val buckets = linkedMapOf<String, GroceryDisplayBucket>()
+
+    items.forEachIndexed { index, serialized ->
+        val baseSerialized = serialized.removeSuffix("|checked")
+        val parsedItem = deserializeGroceryItem(baseSerialized, index, isChecked = serialized.endsWith("|checked"))
+            ?: return@forEachIndexed
+        val category = getCategoryFromSerialized(baseSerialized) ?: "Other"
+        val source = getGrocerySource(baseSerialized)
+        val quantityParts = parseGroceryQuantityLabel(parsedItem.quantity)
+        val unit = quantityParts?.second.orEmpty()
+        val quantityValue = quantityParts?.first ?: 1
+        val key = "${normalizeGroceryName(parsedItem.name)}|${category.lowercase()}|$unit"
+        val isChecked = serialized.endsWith("|checked")
+
+        val existing = buckets[key]
+        if (existing == null) {
+            buckets[key] = GroceryDisplayBucket(
+                category = category,
+                emoji = parsedItem.emoji,
+                name = parsedItem.name,
+                unit = unit,
+                quantity = quantityValue,
+                rawIndices = mutableListOf(index),
+                allChecked = isChecked,
+                sources = mutableSetOf(source)
+            )
+        } else {
+            existing.quantity += quantityValue
+            existing.rawIndices.add(index)
+            existing.allChecked = existing.allChecked && isChecked
+            existing.sources.add(source)
+        }
+    }
+
+    return buckets.values
+        .map { bucket ->
+            val quantityLabel = listOf(bucket.quantity.toString(), bucket.unit)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+            GroceryDisplayItem(
+                category = bucket.category,
+                item = GroceryItem(
+                    id = bucket.rawIndices.first(),
+                    emoji = bucket.emoji,
+                    name = bucket.name,
+                    quantity = quantityLabel.ifBlank { bucket.quantity.toString() },
+                    isChecked = bucket.allChecked
+                ),
+                rawIndices = bucket.rawIndices.toList(),
+                isChecked = bucket.allChecked,
+                sourceNote = buildSourceNote(bucket.sources)
+            )
+        }
+        .groupBy { it.category }
+}
 
 // Category emoji mapping
 private fun getCategoryEmoji(category: String): String {
@@ -64,30 +173,22 @@ private fun getCategoryEmoji(category: String): String {
 fun GroceryScreen() {
     var profile by remember { mutableStateOf<UserProfile?>(null) }
     var showAddSheet by remember { mutableStateOf(false) }
-    var checkedItems by remember { mutableStateOf<Set<Int>>(emptySet()) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         userProfileFlow().collectLatest { 
             profile = it
-            // Load checked items from profile (items ending with |checked)
-            val checked = mutableSetOf<Int>()
-            it?.groceryList?.forEachIndexed { index, serialized ->
-                if (serialized.endsWith("|checked")) {
-                    checked.add(index)
-                }
-            }
-            checkedItems = checked
         }
     }
 
     if (showAddSheet) {
         AddGroceryItemSheet(
-            onSave = { serializedItem ->
+            onSave = { serializedItems ->
                 val currentProfile = profile
                 if (currentProfile != null) {
-                    val updatedList = currentProfile.groceryList + serializedItem
+                    val updatedList = mergeSerializedGroceryItems(currentProfile.groceryList + serializedItems)
                     val updatedProfile = currentProfile.copy(groceryList = updatedList)
+                    profile = updatedProfile
                     scope.launch {
                         try {
                             setUserProfile(updatedProfile)
@@ -106,21 +207,12 @@ fun GroceryScreen() {
 
     // Group items by category
     val itemsByCategory = remember(profile?.groceryList) {
-        val items = profile?.groceryList ?: emptyList()
-        items.mapIndexedNotNull { index, serialized ->
-            val item = deserializeGroceryItem(serialized.replace("|checked", ""), index, index in checkedItems)
-            val category = getCategoryFromSerialized(serialized.replace("|checked", "")) ?: "Other"
-            if (item != null) {
-                Triple(category, item, index)
-            } else {
-                null
-            }
-        }.groupBy { it.first }
+        buildCombinedGroceryItems(profile?.groceryList ?: emptyList())
     }
 
     // Create a map that includes all required categories, even if empty
     val allCategoriesWithItems = remember(itemsByCategory) {
-        val result = mutableMapOf<String, List<Triple<String, GroceryItem, Int>>>()
+        val result = mutableMapOf<String, List<GroceryDisplayItem>>()
         // Add all required categories first
         REQUIRED_CATEGORIES.forEach { category ->
             result[category] = itemsByCategory[category] ?: emptyList()
@@ -169,31 +261,25 @@ fun GroceryScreen() {
                     )
                 }
 
-                items.forEach { (_, item, index) ->
-                    val isChecked = index in checkedItems
+                items.forEach { displayItem ->
                     GroceryItemRow(
-                        item = item,
-                        isChecked = isChecked,
+                        item = displayItem.item,
+                        isChecked = displayItem.isChecked,
+                        sourceNote = displayItem.sourceNote,
                         onToggle = {
                             val currentProfile = profile
                             if (currentProfile != null) {
-                                val updatedChecked = if (isChecked) {
-                                    checkedItems - index
-                                } else {
-                                    checkedItems + index
-                                }
-                                checkedItems = updatedChecked
-                                
-                                // Update serialized string to include/remove checked flag
                                 val updatedList = currentProfile.groceryList.toMutableList()
-                                val serialized = updatedList[index].replace("|checked", "")
-                                updatedList[index] = if (updatedChecked.contains(index)) {
-                                    "$serialized|checked"
-                                } else {
-                                    serialized
+                                displayItem.rawIndices.forEach { rawIndex ->
+                                    val serialized = updatedList[rawIndex].replace("|checked", "")
+                                    updatedList[rawIndex] = if (displayItem.isChecked) {
+                                        serialized
+                                    } else {
+                                        "$serialized|checked"
+                                    }
                                 }
-                                
                                 val updatedProfile = currentProfile.copy(groceryList = updatedList)
+                                profile = updatedProfile
                                 scope.launch {
                                     try {
                                         setUserProfile(updatedProfile)
@@ -206,16 +292,12 @@ fun GroceryScreen() {
                         onDelete = {
                             val currentProfile = profile
                             if (currentProfile != null) {
-                                // Remove the item from the list
                                 val updatedList = currentProfile.groceryList.toMutableList()
-                                updatedList.removeAt(index)
-                                
-                                // Update checked items indices (shift down indices after deleted item)
-                                val updatedChecked = checkedItems.filter { it < index }.toSet() +
-                                        checkedItems.filter { it > index }.map { it - 1 }.toSet()
-                                checkedItems = updatedChecked
-                                
+                                displayItem.rawIndices
+                                    .sortedDescending()
+                                    .forEach { rawIndex -> updatedList.removeAt(rawIndex) }
                                 val updatedProfile = currentProfile.copy(groceryList = updatedList)
+                                profile = updatedProfile
                                 scope.launch {
                                     try {
                                         setUserProfile(updatedProfile)
@@ -246,7 +328,13 @@ fun GroceryScreen() {
 
 
 @Composable
-private fun GroceryItemRow(item: GroceryItem, isChecked: Boolean, onToggle: () -> Unit, onDelete: () -> Unit) {
+private fun GroceryItemRow(
+    item: GroceryItem,
+    isChecked: Boolean,
+    sourceNote: String,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
+) {
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = SavrColors.White,
@@ -288,16 +376,25 @@ private fun GroceryItemRow(item: GroceryItem, isChecked: Boolean, onToggle: () -
             
             Text(item.emoji, fontSize = 18.sp)
 
-            Text(
-                text           = item.name,
-                color          = if (isChecked) SavrColors.TextMuted else SavrColors.Dark,
-                fontSize       = 14.sp,
-                fontWeight     = FontWeight.Medium,
-                textDecoration = if (isChecked) TextDecoration.LineThrough else TextDecoration.None,
-                modifier       = Modifier
+            Column(
+                modifier = Modifier
                     .weight(1f)
                     .clickable { onToggle() }
-            )
+            ) {
+                Text(
+                    text           = item.name,
+                    color          = if (isChecked) SavrColors.TextMuted else SavrColors.Dark,
+                    fontSize       = 14.sp,
+                    fontWeight     = FontWeight.Medium,
+                    textDecoration = if (isChecked) TextDecoration.LineThrough else TextDecoration.None
+                )
+                Text(
+                    text = sourceNote,
+                    color = SavrColors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
 
             Text(
                 text       = item.quantity,
